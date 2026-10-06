@@ -80,6 +80,19 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result
 
+    def _launch_menu(self, application):
+        context = self.Gio.AppLaunchContext()
+        processes = []
+        context.connect("launched", lambda _context, _info, data: processes.append(data.unpack()["pid"]))
+        self.assertTrue(application.launch([], context))
+        self.assertTrue(processes and all(pid > 0 for pid in processes))
+        # Desktop launches are asynchronous. Wait for this command's client,
+        # not just the daemon, before issuing another command to the primary.
+        self._wait_for(
+            lambda: all(not self._alive(pid) for pid in processes),
+            "application-menu command did not finish",
+        )
+
     @staticmethod
     def _alive(pid):
         try:
@@ -165,13 +178,13 @@ class BackgroundTests(unittest.TestCase):
 
         menu_application = self.Gio.DesktopAppInfo.new_from_filename(str(self.desktop))
         self.assertIsNotNone(menu_application)
-        self.assertTrue(menu_application.launch([], None))
+        self._launch_menu(menu_application)
         self._wait_for(
             lambda: self._window_visible(pid, "Jumpkut — Full history"),
             "application-menu launch did not open the full history window",
         )
         self.assertEqual(self._owner(), owner)
-        self.assertTrue(menu_application.launch([], None))
+        self._launch_menu(menu_application)
         self._wait_for(lambda: self._children() == {pid}, "repeated menu launch left another daemon running")
         self.assertEqual(self._owner(), owner)
         self._launch("--show")
