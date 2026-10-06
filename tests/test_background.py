@@ -9,6 +9,7 @@ import time
 import unittest
 
 from install import install
+from jumpkut.settings import _quote_exec_argument
 
 
 @unittest.skipUnless(os.environ.get("JUMPKUT_DESKTOP_TEST") == "1", "requires a disposable X11 desktop")
@@ -28,7 +29,17 @@ class BackgroundTests(unittest.TestCase):
             f"XDG_{kind}_HOME": str(self.root / kind.lower())
             for kind in ("CONFIG", "DATA", "STATE")
         })
-        self.launcher = install(self.root / "installation with spaces")
+        external = os.environ.get("JUMPKUT_TEST_LAUNCHER")
+        self.launcher = Path(external) if external else install(self.root / "installation with spaces")
+        self.desktop = self.launcher.parent.parent / "share/applications/jumpkut.desktop"
+        if external:
+            self.desktop = self.root / "jumpkut.desktop"
+            self.desktop.write_text(
+                "[Desktop Entry]\nType=Application\nName=Jumpkut\n"
+                f"Exec=/usr/bin/env {_quote_exec_argument(str(self.launcher))} --history\n"
+                "Icon=jumpkut\nTerminal=false\n",
+                encoding="utf-8",
+            )
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         self.display = display.Display()
         self.addCleanup(self.display.close)
@@ -135,7 +146,8 @@ class BackgroundTests(unittest.TestCase):
         self._launch()
         owner = self._wait_for(self._owner, "background child did not acquire the application name")
         pid = self._dbus("GetConnectionUnixProcessID", owner)
-        self.assertEqual(os.getsid(pid), pid)
+        if not os.environ.get("JUMPKUT_TEST_LAUNCHER"):
+            self.assertEqual(os.getsid(pid), pid)
         self.assertNotEqual(os.getsid(pid), os.getsid(0))
         stat = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
         self.assertEqual(stat[4], "0", "background child must have no controlling terminal")
@@ -151,8 +163,7 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(self._owner(), owner)
         self.assertFalse(self._window_visible(pid, popup_title))
 
-        desktop = self.launcher.parent.parent / "share/applications/jumpkut.desktop"
-        menu_application = self.Gio.DesktopAppInfo.new_from_filename(str(desktop))
+        menu_application = self.Gio.DesktopAppInfo.new_from_filename(str(self.desktop))
         self.assertIsNotNone(menu_application)
         self.assertTrue(menu_application.launch([], None))
         self._wait_for(

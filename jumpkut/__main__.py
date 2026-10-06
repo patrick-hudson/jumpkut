@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 from . import __version__
-from .settings import log_path
+from .settings import log_path, portable_launcher
 
 
 def parser():
@@ -26,6 +26,14 @@ def parser():
 
 def start_background():
     path = log_path()
+    launcher = portable_launcher()
+    # A detached child needs its own AppImage runtime; the parent's temporary
+    # mount disappears when this command returns.
+    command = (
+        [str(launcher), "--daemon"]
+        if launcher else [sys.executable, "-m", "jumpkut", "--daemon"]
+    )
+    directory = launcher.parent if launcher else Path(__file__).resolve().parent.parent
     try:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         path.parent.chmod(0o700)
@@ -33,8 +41,8 @@ def start_background():
         with os.fdopen(descriptor, "ab") as output:
             os.fchmod(output.fileno(), 0o600)
             subprocess.Popen(
-                [sys.executable, "-m", "jumpkut", "--daemon"],
-                cwd=Path(__file__).resolve().parent.parent,
+                command,
+                cwd=directory,
                 stdin=subprocess.DEVNULL,
                 stdout=output,
                 stderr=output,
@@ -64,7 +72,7 @@ def main(argv=None):
         from gi.repository import GdkX11  # Registers the X11 window methods.
         from .app import Jumpkut
     except (ImportError, ValueError) as exc:
-        print(f"Missing desktop dependency: {exc}\nOn Mint/Ubuntu: sudo apt install python3-gi gir1.2-gtk-3.0 python3-xlib", file=sys.stderr)
+        print(f"Missing desktop dependency: {exc}\nOn Mint/Ubuntu: sudo apt install python3-gi gir1.2-gtk-3.0 python3-xlib librsvg2-common", file=sys.stderr)
         return 1
     GLib.set_prgname("jumpkut")
     GLib.set_application_name("Jumpkut")

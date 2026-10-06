@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Jumpkut
+Comment=Clipboard history and quick selection
+Exec=jumpkut --history
+TryExec=jumpkut
+Icon=jumpkut
+Terminal=false
+Categories=Utility;
+Keywords=clipboard;history;copy;paste;
+StartupWMClass=Jumpkut
+StartupNotify=false
