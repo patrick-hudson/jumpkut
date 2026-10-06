@@ -71,7 +71,7 @@ These are real screenshots of Jumpkut **0.4.0**, using demo clippings.
 On Linux Mint, Ubuntu, or Debian, install the system dependencies, then clone and install Jumpkut for your user:
 
 ```sh
-sudo apt install git python3-gi gir1.2-gtk-3.0 python3-xlib
+sudo apt install git python3-gi gir1.2-gtk-3.0 python3-xlib librsvg2-common
 git clone https://github.com/patrick-hudson/jumpkut.git
 cd jumpkut
 ./install.py

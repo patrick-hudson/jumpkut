@@ -7,7 +7,7 @@ Bug reports, small fixes, and thoughtful feature proposals are welcome. Jumpkut 
 Use Python 3.10 or newer. On Ubuntu, Debian, or Linux Mint, install the dependencies for the app and its desktop tests:
 
 ```sh
-sudo apt install git python3-gi gir1.2-gtk-3.0 python3-xlib xvfb metacity dbus-x11
+sudo apt install git python3-gi gir1.2-gtk-3.0 python3-xlib librsvg2-common xvfb metacity dbus-x11
 git clone https://github.com/patrick-hudson/jumpkut.git
 cd jumpkut
 ```

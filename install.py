@@ -31,7 +31,7 @@ def check_dependencies() -> None:
         raise RuntimeError(
             "Jumpkut needs Python 3.10+, GTK 3, PyGObject, and python-xlib "
             "for /usr/bin/python3.\n"
-            "On Mint/Ubuntu: sudo apt install python3-gi gir1.2-gtk-3.0 python3-xlib\n"
+            "On Mint/Ubuntu: sudo apt install python3-gi gir1.2-gtk-3.0 python3-xlib librsvg2-common\n"
             + check.stderr.strip()
         )
 

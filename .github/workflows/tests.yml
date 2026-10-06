@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            python3-gi gir1.2-gtk-3.0 python3-xlib xvfb metacity dbus-x11
+            python3-gi gir1.2-gtk-3.0 python3-xlib librsvg2-common xvfb metacity dbus-x11
 
       - name: Run headless tests
         run: /usr/bin/python3 -m unittest discover -s tests -v
