@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-06
+
 ### Added
 
 - Installable Debian/Ubuntu/Mint `.deb` and Fedora `.rpm` packages with a desktop menu entry and scissors icon.

@@ -1,6 +1,6 @@
 # Validation
 
-Jumpkut 0.4.0 was verified on Linux Mint 22.3 with system Python 3.12 and GTK 3.24. GitHub Actions also runs the headless and native suites on Ubuntu 24.04.
+Jumpkut 0.5.0 was verified on Linux Mint 22.3 with system Python 3.12 and GTK 3.24. GitHub Actions runs the headless and native suites on Ubuntu 24.04 and builds/tests Linux installers on Ubuntu 22.04.
 
 ## Automated checks
 
