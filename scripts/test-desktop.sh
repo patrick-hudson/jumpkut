@@ -87,7 +87,8 @@ from Xlib import X, display
 
 connection = display.Display()
 atom = connection.intern_atom("_NET_SUPPORTING_WM_CHECK")
-deadline = time.monotonic() + 5
+# Hosted runners can take longer to initialize their first GTK process.
+deadline = time.monotonic() + 20
 while time.monotonic() < deadline:
     if connection.screen().root.get_full_property(atom, X.AnyPropertyType):
         connection.close()
@@ -97,7 +98,8 @@ else:
     raise SystemExit("Metacity did not initialize on the disposable display")
 PYTHON
 then
-    tail -n 40 "$temporary/metacity.log" >&2
+    ps -p "$window_manager" -o pid,stat,comm >&2 || true
+    tail -n 40 "$temporary/metacity.log" "$temporary/xvfb.log" >&2
     exit 1
 fi
 
