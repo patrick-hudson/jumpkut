@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jumpkut"
+dynamic = ["version"]
+description = "A keyboard-first clipboard history manager for Linux/X11"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[project.scripts]
+jumpkut = "jumpkut.__main__:main"
+
+[tool.setuptools.package-data]
+jumpkut = ["assets/*.svg"]
+
+[tool.setuptools.dynamic]
+version = {attr = "jumpkut.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["jumpkut*"]

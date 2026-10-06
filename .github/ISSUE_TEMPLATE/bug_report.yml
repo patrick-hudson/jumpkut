@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible problem with Jumpkut.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Jumpkut. Reproduce clipboard problems with sample text, and include only logs or screenshots you are comfortable publishing.
+  - type: input
+    id: version
+    attributes:
+      label: Jumpkut version
+      description: Run `jumpkut --version`, or check About Jumpkut in the tray menu.
+      placeholder: Jumpkut 0.4.0
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your Linux distribution and version, desktop environment, session type, and installation method. Jumpkut currently requires X11.
+      placeholder: |
+        Distribution: Linux Mint 22.3
+        Desktop: Cinnamon
+        Session: X11 (check with echo "$XDG_SESSION_TYPE")
+        Installed with: ./install.py
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include relevant preferences, the app you copied from or pasted into, and example text if needed.
+      placeholder: |
+        1. Copy "first example" in a text editor.
+        2. Copy "second example".
+        3. Hold Alt and press C.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant logs or screenshots
+      description: Optional. Background output is normally in ~/.local/state/jumpkut/jumpkut.log. Remove private clipboard text before sharing.

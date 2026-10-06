@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            python3-gi gir1.2-gtk-3.0 python3-xlib xvfb metacity dbus-x11
+
+      - name: Run headless tests
+        run: /usr/bin/python3 -m unittest discover -s tests -v
+
+      - name: Run isolated desktop tests
+        run: ./scripts/test-desktop.sh

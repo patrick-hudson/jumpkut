@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an improvement to Jumpkut.
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would this help you do?
+      description: Describe your workflow and the problem you want to solve. Use sample clipboard text if an example helps.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain how you would like Jumpkut to work.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or related details
+      description: Optional. Include your desktop environment or session type if the idea depends on them.
