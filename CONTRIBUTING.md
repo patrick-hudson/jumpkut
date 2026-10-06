@@ -46,6 +46,38 @@ For a pull request, describe the problem, the resulting behavior, and the checks
 
 ## Release changes
 
+### Build installers
+
+Native package builders need `dpkg-deb` and `rpmbuild`. On Ubuntu or Mint:
+
+```sh
+sudo apt install dpkg-dev rpm cpio desktop-file-utils
+./scripts/build-deb.py --output-dir dist
+./scripts/build-rpm.py --output-dir dist
+```
+
+The AppImage builder targets x86_64. Official releases build on **Ubuntu 22.04** for a glibc 2.35 baseline. Building on a newer distribution can raise the minimum runtime requirement.
+
+```sh
+sudo apt install libgtk-3-dev libgtk-3-bin libgdk-pixbuf2.0-bin librsvg2-dev \
+  libgirepository1.0-dev pkg-config file curl patchelf desktop-file-utils dpkg-dev
+./scripts/build-appimage.sh --output-dir dist
+```
+
+The builder downloads pinned, checksum-verified AppImage tools into a temporary directory. It bundles Python, GTK, PyGObject, Xlib, introspection metadata, schemas, SVG support, and dependency license notices. It does not install onto your host.
+
+To test an installed package or AppImage, use the disposable native runner:
+
+```sh
+JUMPKUT_TEST_LAUNCHER=/usr/bin/jumpkut ./scripts/test-desktop.sh
+APPIMAGE_EXTRACT_AND_RUN=1 JUMPKUT_TEST_LAUNCHER="$PWD/dist/Jumpkut-VERSION-x86_64.AppImage" \
+  ./scripts/test-desktop.sh
+```
+
+This runs the background, single-instance, application-menu, Show, and Quit checks against that executable. Replace `VERSION` with the version you built. Without `JUMPKUT_TEST_LAUNCHER`, the runner checks the source app and its user installer.
+
+### Publish a release
+
 For a user-visible change, add concise release notes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md). The application version lives only in `jumpkut/__init__.py`; package metadata reads it dynamically.
 
 When a change is complete and its checks pass, make one version bump for the request:
@@ -55,5 +87,17 @@ When a change is complete and its checks pass, make one version bump for the req
 ```
 
 Use `patch` for fixes, `minor` for new features, or `major` for breaking changes. The helper moves pending notes into a dated release entry and updates the canonical version. The clipboard backup schema has its own version and does not change with an application release.
+
+Commit the release version and changelog, land the change on `main`, then push an annotated tag matching the canonical version:
+
+```sh
+version=$(/usr/bin/python3 -c 'from jumpkut import __version__; print(__version__)')
+git tag -a "v$version" -m "Jumpkut $version"
+git push origin "v$version"
+```
+
+The **Linux packages** action validates the tag against the application version, runs tests, builds the `.deb`, `.rpm`, and `.AppImage`, and tests the installed Debian package and portable AppImage. It publishes a GitHub release with the installers and SHA256SUMS only after those checks pass. A mismatched tag fails without publishing. Untagged pushes, pull requests, and manual runs create downloadable Actions artifacts without cutting a release.
+
+Build jobs have read-only repository access; only the tag-triggered publishing job receives write access. Re-running a tagged build updates that release's package assets.
 
 To update a local installation, run `./install.py`. It preserves history and preferences. Reload a running instance only after its history is persisted; preserve any temporary history first.

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-06
+
+### Added
+
+- Installable Debian/Ubuntu/Mint `.deb` and Fedora `.rpm` packages with a desktop menu entry and scissors icon.
+- A portable x86_64 AppImage bundling Python, GTK, and clipboard dependencies, built against Ubuntu 22.04.
+- GitHub Actions builds and tests installers, saves build artifacts, and publishes packages and SHA256 checksums for matching version tags.
+
+### Fixed
+
+- AppImage background launch and startup entries use the persistent executable so temporary mounts can close safely.
+
 ## [0.4.0] - 2026-10-05
 
 ### Changed

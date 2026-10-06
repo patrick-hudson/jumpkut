@@ -55,6 +55,12 @@ def autostart_path() -> Path:
     return _config_root() / "autostart/jumpkut.desktop"
 
 
+def portable_launcher() -> Path | None:
+    """The persistent AppImage (or extracted AppRun), supplied by AppRun."""
+    value = os.environ.get("JUMPKUT_LAUNCHER")
+    return Path(value) if value and Path(value).is_absolute() else None
+
+
 def _validate(settings: Settings) -> None:
     if not isinstance(settings, Settings):
         raise ValueError("Preferences must be a Settings value")
@@ -187,13 +193,19 @@ def set_autostart(enabled: bool) -> None:
     if not enabled:
         path.unlink(missing_ok=True)
         return
+    launcher = portable_launcher()
     run_path = Path(__file__).resolve().parents[1] / "run.py"
+    extraction = "APPIMAGE_EXTRACT_AND_RUN=1 " if os.environ.get("APPIMAGE_EXTRACT_AND_RUN") == "1" else ""
+    command = (
+        f"/usr/bin/env {extraction}{_quote_exec_argument(str(launcher))}"
+        if launcher else f"/usr/bin/python3 {_quote_exec_argument(str(run_path))}"
+    )
     content = (
         "[Desktop Entry]\n"
         "Type=Application\n"
         "Name=Jumpkut\n"
         "Comment=Clipboard history and quick selection\n"
-        f"Exec=/usr/bin/python3 {_quote_exec_argument(str(run_path))} --daemon\n"
+        f"Exec={command} --daemon\n"
         "Icon=edit-paste\n"
         "Terminal=false\n"
         "X-GNOME-Autostart-enabled=true\n"

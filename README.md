@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/patrick-hudson/jumpkut/actions/workflows/tests.yml"><img src="https://github.com/patrick-hudson/jumpkut/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/patrick-hudson/jumpkut/actions/workflows/packages.yml"><img src="https://github.com/patrick-hudson/jumpkut/actions/workflows/packages.yml/badge.svg?branch=main" alt="Linux packages"></a>
   <a href="https://github.com/patrick-hudson/jumpkut/releases/latest"><img src="https://img.shields.io/github/v/release/patrick-hudson/jumpkut?color=7863cf" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7863cf" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/desktop-Linux%20%2F%20X11-7863cf" alt="Linux / X11">
@@ -67,6 +68,55 @@ These are real screenshots of Jumpkut **0.4.0**, using demo clippings.
 </table>
 
 ## Installation
+
+Download an installer from **[the latest release](https://github.com/patrick-hudson/jumpkut/releases/latest)**. All formats require an **X11 session** and support the same clipboard history, preferences, and backups.
+
+| Format | Use it on | What is included |
+|---|---|---|
+| **.deb** | Linux Mint, Ubuntu, Debian with Python 3.10+ | System-wide command, application-menu entry, and scissors icon; apt installs dependencies. |
+| **.rpm** | Fedora with Python 3.10+ | System-wide command, application-menu entry, and scissors icon; dnf installs dependencies. |
+| **.AppImage** | x86_64 Linux with glibc 2.35+ | Portable bundle containing Python, GTK, and the application's dependencies. |
+
+### Debian, Ubuntu & Linux Mint
+
+From the directory containing your downloaded `.deb`:
+
+```sh
+sudo apt install ./jumpkut_*_all.deb
+jumpkut
+```
+
+### Fedora
+
+From the directory containing your downloaded `.rpm`:
+
+```sh
+sudo dnf install ./jumpkut-*.noarch.rpm
+jumpkut
+```
+
+Both native packages add **Jumpkut** to your desktop's application menu. Open it there to browse Full History. Installing a later package updates the app and preserves your saved history and preferences.
+
+### Portable AppImage
+
+Save the AppImage somewhere permanent, such as `~/Applications`, then make it executable and run it:
+
+```sh
+chmod +x Jumpkut-*-x86_64.AppImage
+./Jumpkut-*-x86_64.AppImage
+```
+
+It starts in the background. Append `--history` to open Full History or `--preferences` to configure it. Enable **Run at startup** after placing the file in its permanent location. If you move or rename the AppImage, disable and re-enable startup from its new location.
+
+If your desktop cannot mount AppImages with FUSE, use the runtime's extraction mode:
+
+```sh
+APPIMAGE_EXTRACT_AND_RUN=1 ./Jumpkut-*-x86_64.AppImage
+```
+
+Release downloads include **SHA256SUMS**. Put it beside the downloaded packages and run `sha256sum --check --ignore-missing SHA256SUMS` to verify them. Source `.zip` and `.tar.gz` archives are also available on each release page.
+
+### Install from source
 
 On Linux Mint, Ubuntu, or Debian, install the system dependencies, then clone and install Jumpkut for your user:
 
@@ -176,6 +226,10 @@ jumpkut --daemon       # Run attached to the terminal for debugging
 
 ## Updating
 
+For `.deb` and `.rpm` installations, quit the running app, install the newer downloaded package with the command above, and start Jumpkut again. For AppImage, quit the app, replace the old file, and run the new one. Re-enable startup if its filename changed. Saved history and preferences live in your XDG directories and are shared between installation formats.
+
+If you previously used `./install.py`, its `~/.local/bin/jumpkut` command and `~/.local/share/applications/jumpkut.desktop` menu entry may take precedence over the native package. Quit the old app, rename those two files, and start `/usr/bin/jumpkut`. Then disable and re-enable **Run at startup** in the new app. This does not require removing any saved history.
+
 From your source checkout:
 
 ```sh
@@ -205,6 +259,8 @@ sudo apt install xvfb metacity dbus-x11
 ```
 
 The native runner uses a disposable X11 display, a private session bus, and temporary history and preferences. It does not use your live clipboard. GitHub Actions runs both suites.
+
+The **[Linux packages workflow](https://github.com/patrick-hudson/jumpkut/actions/workflows/packages.yml)** builds all three packages on pushes and pull requests; you can also run it manually. CI tests the native package and AppImage after packaging, then saves the files as an Actions artifact. Pushing a matching `vX.Y.Z` tag publishes the tested installers and checksums as a GitHub release.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for development and releases, [CHANGELOG.md](CHANGELOG.md) for release notes, and [validation notes](docs/validation.md) for test coverage.
 

@@ -102,6 +102,8 @@ then
 fi
 
 cd -- "$project"
-/usr/bin/python3 -m unittest discover -s tests -p test_desktop.py -v
+if [ -z "${JUMPKUT_TEST_LAUNCHER:-}" ]; then
+    /usr/bin/python3 -m unittest discover -s tests -p test_desktop.py -v
+fi
 /usr/bin/python3 -m unittest discover -s tests -p test_background.py -v
 SESSION
