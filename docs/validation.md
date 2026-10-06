@@ -1,6 +1,6 @@
 # Validation
 
-Jumpkut 0.5.0 was verified on Linux Mint 22.3 with system Python 3.12 and GTK 3.24. GitHub Actions runs the headless and native suites on Ubuntu 24.04 and builds/tests Linux installers on Ubuntu 22.04.
+Jumpkut 0.5.1 was verified on Linux Mint 22.3 with system Python 3.12 and GTK 3.24. GitHub Actions runs the headless and native suites on Ubuntu 24.04 and builds/tests Linux installers on Ubuntu 22.04.
 
 ## Automated checks
 
@@ -30,7 +30,7 @@ The native runner starts Xvfb and Metacity on a disposable display, creates a pr
 
 ## Installer checks
 
-The Linux packages workflow builds on Ubuntu 22.04, runs the source checks, then installs the `.deb` on its disposable runner and checks its detached launch, application-menu command, single-instance behavior, Show, and Quit. It runs those same commands against the built AppImage in extraction mode, with a private X11 display, D-Bus session, and temporary XDG data. RPM checks verify the built archive, dependencies, manifest, and extracted launcher; a Fedora GUI installation is not part of this CI run.
+The Linux packages workflow builds on Ubuntu 22.04, runs the source checks, then installs the `.deb` on its disposable runner and checks its detached launch, application-menu command, single-instance behavior, Show, and Quit. It runs those same commands against the built AppImage in extraction mode, with a private X11 display, D-Bus session, and temporary XDG data. A separate Ubuntu 24.04 job verifies clean startup with newer host GVfs modules installed and repeats the portable desktop commands. RPM checks verify the built archive, dependencies, manifest, and extracted launcher; a Fedora GUI installation is not part of this CI run.
 
 Tag builds validate the tag against the canonical application version before publishing. SHA256SUMS covers all three installers. Release notes select only that version's changelog section, and older tagged reruns preserve automatic date/version ordering for the latest release.
 

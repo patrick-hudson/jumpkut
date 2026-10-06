@@ -47,6 +47,9 @@ class AppImageLauncherTests(unittest.TestCase):
                 "PYTHONPATH": "/tmp/expired-mount/modules",
                 "PYTHONUSERBASE": "/tmp/foreign-python",
                 "GI_TYPELIB_PATH": "/tmp/expired-mount/typelibs",
+                "GIO_MODULE_DIR": "/tmp/host-gio-modules",
+                "GIO_EXTRA_MODULES": "/tmp/extra-host-gio-modules",
+                "GIO_USE_VFS": "gvfs",
                 "GDK_PIXBUF_MODULE_FILE": "/tmp/expired-mount/loaders.cache",
                 "GTK_IM_MODULE_FILE": "/tmp/expired-mount/immodules.cache",
                 "GTK_MODULES": "a-host-only-module",
@@ -66,6 +69,9 @@ class AppImageLauncherTests(unittest.TestCase):
             self.assertEqual(actual["JUMPKUT_LAUNCHER"], str(image))
             self.assertEqual(actual["LD_LIBRARY_PATH"], str(appdir / "usr/lib"))
             self.assertEqual(actual["GI_TYPELIB_PATH"], str(appdir / "usr/lib/girepository-1.0"))
+            self.assertEqual(actual["GIO_MODULE_DIR"], str(appdir / "usr/lib/gio/modules"))
+            self.assertEqual(actual["GIO_USE_VFS"], "local")
+            self.assertNotIn("GIO_EXTRA_MODULES", actual)
             for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
                 self.assertEqual(actual[name], environment[name])
             self.assertNotIn("PYTHONUSERBASE", actual)

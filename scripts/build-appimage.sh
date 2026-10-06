@@ -64,7 +64,7 @@ mkdir "$tools/linuxdeploy" "$tools/appimagetool"
 linuxdeploy="$tools/linuxdeploy/squashfs-root/usr/bin/linuxdeploy"
 cp "$tools/linuxdeploy-plugin-gtk.sh" "$(dirname "$linuxdeploy")/linuxdeploy-plugin-gtk.sh"
 
-mkdir -p "$appdir/usr/bin" "$appdir/usr/lib/python3/dist-packages" "$appdir/usr/share/jumpkut" \
+mkdir -p "$appdir/usr/bin" "$appdir/usr/lib/python3/dist-packages" "$appdir/usr/lib/gio/modules" "$appdir/usr/share/jumpkut" \
     "$appdir/usr/share/applications" "$appdir/usr/share/icons/hicolor/scalable/apps"
 cp -L /usr/bin/python3 "$appdir/usr/bin/python3"
 cat > "$appdir/usr/bin/jumpkut" <<'LAUNCHER'

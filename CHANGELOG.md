@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-06
+
+### Fixed
+
+- The AppImage uses its own GIO module directory and local file backend, avoiding incompatible host GVfs modules on newer Linux distributions.
+
 ## [0.5.0] - 2026-10-06
 
 ### Added

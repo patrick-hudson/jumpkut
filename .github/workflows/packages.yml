@@ -101,9 +101,45 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  portable:
+    name: AppImage on Ubuntu 24.04
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install desktop test dependencies and newer host GIO modules
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            python3-gi gir1.2-gtk-3.0 python3-xlib librsvg2-common \
+            xvfb metacity dbus-x11 gvfs
+
+      - name: Download built packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux-packages
+          path: dist
+
+      - name: Test portable runtime on a newer Linux host
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          (cd dist && sha256sum --check SHA256SUMS)
+          version=$(/usr/bin/python3 -c 'from jumpkut import __version__; print(__version__)')
+          image="$PWD/dist/Jumpkut-$version-x86_64.AppImage"
+          chmod +x "$image"
+          "$image" --version > "$RUNNER_TEMP/appimage-version.log" 2> "$RUNNER_TEMP/appimage-stderr.log"
+          cat "$RUNNER_TEMP/appimage-version.log" "$RUNNER_TEMP/appimage-stderr.log"
+          grep -Fx "Jumpkut $version" "$RUNNER_TEMP/appimage-version.log"
+          test ! -s "$RUNNER_TEMP/appimage-stderr.log"
+          JUMPKUT_TEST_LAUNCHER="$image" ./scripts/test-desktop.sh
+
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, portable]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

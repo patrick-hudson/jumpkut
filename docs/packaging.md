@@ -22,6 +22,8 @@ Official builds use Ubuntu 22.04 and its Python 3.10 runtime. Building on a newe
 
 `JUMPKUT_LAUNCHER` identifies the persistent AppImage, or `AppRun` in a manually extracted directory. Detached launch invokes that launcher again so the child has its own runtime. Startup entries point to the persistent file instead of a temporary mount.
 
+GIO uses an empty module directory inside the image and its built-in local file backend. This prevents newer host GVfs plugins from loading against the bundled GLib. Local files and mounted directories remain available for backups.
+
 The build script pins and verifies these upstream tools before running them:
 
 - [linuxdeploy](https://github.com/linuxdeploy/linuxdeploy), release `1-alpha-20251107-1`.
@@ -33,7 +35,7 @@ SHA256 values are recorded in the build script. Third-party copyright notices, c
 
 ## Release automation
 
-Pushes, pull requests, and manual runs build packages and save them as a `linux-packages` Actions artifact. A push of `vX.Y.Z` validates the tag against `jumpkut/__init__.py`, runs the headless/native checks, builds all formats, and runs background/desktop command checks against the installed `.deb` and portable AppImage.
+Pushes, pull requests, and manual runs build packages and save them as a `linux-packages` Actions artifact. A push of `vX.Y.Z` validates the tag against `jumpkut/__init__.py`, runs the headless/native checks, builds all formats, and runs background/desktop command checks against the installed `.deb` and portable AppImage. The same AppImage also runs on Ubuntu 24.04 with newer GVfs plugins installed; module loader errors block publication.
 
 Only after the build succeeds does a separate job publish the installers and `SHA256SUMS` to the matching GitHub release. New releases start as drafts, become public after all assets upload, and use the version's changelog notes. Tagged reruns replace package assets on that release. Build jobs have read access; the publishing job alone has write access.
 
