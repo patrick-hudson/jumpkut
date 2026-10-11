@@ -89,7 +89,8 @@ class DesktopTests(unittest.TestCase):
             self.app.history_window.destroy()
         self.app.save_preferences(replace(self.app.config.settings, hotkey="<Alt>c", sticky=False,
                                           history_limit=30, tray_limit=10,
-                                          custom_quick_limit=False, custom_tray_limit=False), False)
+                                          custom_quick_limit=False, custom_tray_limit=False,
+                                          resume_last_selection=True), False)
         self.pump()
 
     def key(self, name, down):
@@ -194,7 +195,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(self.entry.get_text(), older, "selected clipping must paste into original editor")
         self.assertEqual([clip.text for clip in self.app.history.items], ["newer clipping", older])
 
-    def test_fresh_hotkey_always_starts_at_most_recent_copy(self):
+    def test_hotkey_resumes_last_selection_until_a_new_copy(self):
         self.copy("oldest copy")
         self.copy("older copy")
         self.copy("most recent copy")
@@ -218,8 +219,8 @@ class DesktopTests(unittest.TestCase):
 
         self.focus_editor()
         self.open_hotkey()
-        self.assertEqual(self.app.popup.selected.text, "most recent copy")
-        self.assertEqual(self.app.popup.counter.get_text(), "1")
+        self.assertEqual(self.app.popup.selected.text, "older copy")
+        self.assertEqual(self.app.popup.counter.get_text(), "2")
         self.tap("Down")
         self.tap("Escape")
         self.key("Alt_L", False)
@@ -227,7 +228,16 @@ class DesktopTests(unittest.TestCase):
 
         self.focus_editor()
         self.open_hotkey()
-        self.assertEqual(self.app.popup.selected.text, "most recent copy")
+        self.assertEqual(self.app.popup.selected.text, "older copy")
+        self.assertEqual(self.app.popup.counter.get_text(), "2")
+        self.tap("Escape")
+        self.key("Alt_L", False)
+        self.pump()
+
+        self.copy("oldest copy")
+        self.focus_editor()
+        self.open_hotkey()
+        self.assertEqual(self.app.popup.selected.text, "oldest copy")
         self.assertEqual(self.app.popup.counter.get_text(), "1")
         self.tap("Escape")
         self.key("Alt_L", False)
@@ -238,6 +248,54 @@ class DesktopTests(unittest.TestCase):
         self.open_hotkey()
         self.assertEqual(self.app.popup.selected.text, "a newly copied clipping")
         self.assertEqual(self.app.popup.counter.get_text(), "1")
+
+    def test_resume_tracks_the_clipping_when_entries_are_deleted(self):
+        for text in ("oldest", "remembered", "newest"):
+            self.copy(text)
+        self.focus_editor()
+        self.open_hotkey()
+        self.tap("Down")
+        self.key("Alt_L", False)
+        self.pump(0.35)
+        self.app.remove_clip(self.app.history.items[0].id)
+        self.focus_editor()
+        self.open_hotkey()
+        self.assertEqual(self.app.popup.selected.text, "remembered")
+        self.assertEqual(self.app.popup.counter.get_text(), "1")
+        self.tap("Escape")
+        self.key("Alt_L", False)
+        self.app.remove_clip(self.app.history.items[0].id)
+        self.focus_editor()
+        self.open_hotkey()
+        self.assertEqual(self.app.popup.selected.text, "oldest")
+        self.assertEqual(self.app.popup.counter.get_text(), "1")
+
+    def test_resume_preference_and_quick_limit_fall_back_to_newest(self):
+        for text in ("oldest", "remembered", "newest"):
+            self.copy(text)
+        self.focus_editor()
+        self.open_hotkey()
+        self.tap("Down")
+        self.key("Alt_L", False)
+        self.pump(0.35)
+        self.app.show_preferences()
+        self.pump()
+        preferences = self.app.preferences
+        self.assertTrue(preferences.resume.get_active())
+        preferences.resume.set_active(False)
+        preferences.response(self.Gtk.ResponseType.OK)
+        self.assertFalse(self.app.config.settings.resume_last_selection)
+        self.focus_editor()
+        self.open_hotkey()
+        self.assertEqual(self.app.popup.selected.text, "newest")
+        self.tap("Escape")
+        self.key("Alt_L", False)
+        self.app.save_preferences(replace(self.app.config.settings, resume_last_selection=True,
+                                          custom_quick_limit=True, history_limit=1), False)
+        self.focus_editor()
+        self.open_hotkey()
+        self.assertEqual(self.app.popup.selected.text, "newest")
+        self.assertEqual(len(self.app.history.items), 3)
 
     def test_escape_cancels_without_changing_clipboard(self):
         self.copy("older")
@@ -354,10 +412,15 @@ class DesktopTests(unittest.TestCase):
             self.assertIn(option, labels)
         self.screenshot("tray-menu.png", menu)
         menu.popdown()
-        menu.get_children()[1].activate()
+        menu.get_children()[2].activate()
         self.pump(0.35)
-        self.assertEqual(self.app.clipboard.wait_for_text(), "clipping 11")
-        self.assertEqual(self.entry.get_text(), "clipping 11")
+        self.assertEqual(self.app.clipboard.wait_for_text(), "clipping 10")
+        self.assertEqual(self.entry.get_text(), "clipping 10")
+        self.app.save_preferences(replace(self.app.config.settings, custom_quick_limit=False), False)
+        self.focus_editor()
+        self.open_hotkey()
+        self.assertEqual(self.app.popup.selected.text, "clipping 10")
+        self.assertEqual(self.app.popup.counter.get_text(), "2")
 
     def test_tray_full_history_browses_all_clippings_and_copies_exact_text(self):
         self.app.save_preferences(replace(self.app.config.settings, history_limit=3, custom_quick_limit=True), False)
@@ -402,6 +465,20 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(self.entry.get_text(), "", "copying from full history must not inject text into another app")
         self.assertTrue(window.get_visible(), "copying must keep the browsing window open")
         self.assertEqual([clip.id for clip in self.app.history.items], original_order)
+
+        self.app.show_popup()
+        self.pump()
+        self.assertEqual(self.app.popup.counter.get_text(), "1", "a clipping outside the quick limit falls back to newest")
+        self.app.cancel_popup(restore=False)
+        remembered_row = next(row for row in window.model if row[0] == original_order[1])
+        window.tree.set_cursor(remembered_row.path)
+        window.copy_button.clicked()
+        self.pump()
+        self.app.show_popup()
+        self.pump()
+        self.assertEqual(self.app.popup.selected.id, original_order[1])
+        self.assertEqual(self.app.popup.counter.get_text(), "2")
+        self.app.cancel_popup(restore=False)
 
         window.search.set_text("Saved")
         self.pump(0.3)

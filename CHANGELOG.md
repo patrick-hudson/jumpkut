@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-10
+
+### Added
+
+- Resume last selection in the Alt+C picker until a new external copy, enabled by default and configurable in Preferences. The picker follows the clipping when history positions change; canceled browsing does not change the remembered selection.
+
 ## [0.5.1] - 2026-10-06
 
 ### Fixed
