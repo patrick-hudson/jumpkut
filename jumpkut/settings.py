@@ -20,6 +20,7 @@ class Settings:
     tray_limit: int = 10
     custom_quick_limit: bool = False
     custom_tray_limit: bool = False
+    resume_last_selection: bool = True
 
     @property
     def quick_history_limit(self) -> int:
@@ -73,7 +74,7 @@ def _validate(settings: Settings) -> None:
         raise ValueError("Quick history length must be an integer between 1 and 10000")
     if type(settings.tray_limit) is not int or not 1 <= settings.tray_limit <= 10000:
         raise ValueError("Tray history length must be an integer between 1 and 10000")
-    for name in ("sticky", "auto_paste", "persist", "custom_quick_limit", "custom_tray_limit"):
+    for name in ("sticky", "auto_paste", "persist", "custom_quick_limit", "custom_tray_limit", "resume_last_selection"):
         if type(getattr(settings, name)) is not bool:
             raise ValueError(f"{name} must be true or false")
 

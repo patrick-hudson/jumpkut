@@ -74,9 +74,9 @@ class Popup(Gtk.ApplicationWindow):
         self.hint.get_style_context().add_class("muted")
         box.pack_start(self.hint, False, False, 0)
 
-    def open(self, clips, release_selects, timestamp):
+    def open(self, clips, release_selects, timestamp, selected_id):
         self.clips = list(clips)
-        self.index = 0
+        self.index = next((index for index, clip in enumerate(self.clips) if clip.id == selected_id), 0)
         self.hint.set_text("↑ ↓ cycle   ·   Release modifiers to select   ·   Esc cancel" if release_selects else "↑ ↓ cycle   ·   Enter select   ·   Delete remove   ·   Esc cancel")
         self.render()
         self.show_all()
@@ -213,9 +213,12 @@ class Preferences(Gtk.Dialog):
         self.startup.set_active(app.autostart_enabled())
         self.sticky = Gtk.CheckButton(label="Keep history open until Enter")
         self.sticky.set_active(app.config.settings.sticky)
+        self.resume = Gtk.CheckButton(label="Resume last selection")
+        self.resume.set_active(app.config.settings.resume_last_selection)
+        self.resume.set_tooltip_text("Reopen the last selected clipping until you copy something new")
         self.paste = Gtk.CheckButton(label="Paste automatically into the previous app")
         self.paste.set_active(app.config.settings.auto_paste)
-        for widget in (self.startup, self.sticky, self.paste):
+        for widget in (self.startup, self.resume, self.sticky, self.paste):
             box.pack_start(widget, False, False, 0)
         box.pack_start(Gtk.Separator(), False, False, 0)
         backup_box = Gtk.Box(spacing=10)
@@ -244,7 +247,8 @@ class Preferences(Gtk.Dialog):
                                    tray_limit=self.tray_limit.get_value_as_int(),
                                    custom_quick_limit=self.custom_quick.get_active(),
                                    custom_tray_limit=self.custom_tray.get_active(),
-                                   sticky=self.sticky.get_active(), auto_paste=self.paste.get_active())
+                                   sticky=self.sticky.get_active(), auto_paste=self.paste.get_active(),
+                                   resume_last_selection=self.resume.get_active())
             try:
                 self.app.save_preferences(new_settings, self.startup.get_active())
             except (ValueError, RuntimeError, OSError) as exc:

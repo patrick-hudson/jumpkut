@@ -162,7 +162,7 @@ Use `./install.py --prefix /some/directory` for a custom installation base. You 
 
 | In the quick picker | Action |
 |---|---|
-| **Alt+C** | Open at the newest clipping; repeated C cycles while Alt is held. |
+| **Alt+C** | Resume the last selected clipping, or start at the newest after a new copy; repeated C cycles while Alt is held. |
 | **↑ / ↓** | Browse recent clippings. |
 | **Release Alt** | Select and automatically paste, with default preferences. |
 | **Enter** | Select in sticky mode or when opened with `--show`. |
@@ -186,11 +186,14 @@ Click the scissors tray icon and choose **Preferences**.
 | Full History | **All saved clippings** | Delete individual entries or use Clear History. |
 | Run at startup | **Off** | Enable it to start at login. |
 | Automatic paste | **On** | Disable it to copy selections without pasting. |
+| Resume last selection | **On** | Reopen the last selected clipping until you copy something new. Disable it to always start at #1. |
 | Keep picker open until Enter | **Off** | Enable it to choose after releasing the shortcut. |
 
 The two custom-length checkboxes start unchecked. Unchecking one restores that view's default and remembers its custom value for later. **Changing either limit never removes older clippings from Full History.**
 
 A shortcut already in use produces an error. Changes take effect when you save.
+
+During the current session, the quick picker remembers the clipping you last selected from the picker, tray, or Full History. Selecting through Jumpkut keeps the original copy order and does not count as a new copy. Browsing and canceling leaves that selection unchanged. Copying text in another app resets the picker to #1, including copying text already in the archive. If the remembered clipping is deleted or outside the quick history limit, the picker starts at #1. Restarting Jumpkut also starts at #1.
 
 ## History & backups
 

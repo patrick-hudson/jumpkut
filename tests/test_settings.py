@@ -19,6 +19,18 @@ from jumpkut.settings import (
 
 
 class SettingsTests(unittest.TestCase):
+    def test_resume_default_and_legacy_preferences_preserve_the_original_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            original = b'{"hotkey": "<Control>v", "sticky": true}'
+            path.write_bytes(original)
+            config = Config(path)
+            self.assertTrue(config.settings.resume_last_selection)
+            self.assertIsNone(config.load_error)
+            self.assertEqual(path.read_bytes(), original)
+            config.save(replace(config.settings, resume_last_selection=False))
+            self.assertFalse(Config(path).settings.resume_last_selection)
+
     def test_defaults_and_settings_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config" / "config.json"
@@ -131,6 +143,7 @@ class SettingsTests(unittest.TestCase):
             ] + [
                 Settings(sticky=1), Settings(auto_paste="true"), Settings(persist=None),
                 Settings(custom_quick_limit=1), Settings(custom_tray_limit="true"),
+                Settings(resume_last_selection=1),
             ]
             for settings in invalid_settings:
                 with self.subTest(settings=settings), self.assertRaises(ValueError):

@@ -39,6 +39,7 @@ class Jumpkut(Gtk.Application):
         self.paused = False
         self._generation = 0
         self._ignore_text = None
+        self._last_selected_clip_id = None
         self._previous_window = None
         self._release_source = 0
         self._paste_source = 0
@@ -139,6 +140,8 @@ class Jumpkut(Gtk.Application):
             self._ignore_text = None
             if text is None or text == ignored:
                 return
+            if text.strip():
+                self._last_selected_clip_id = None
             try:
                 self.history.add(text)
             except OSError as exc:
@@ -155,7 +158,8 @@ class Jumpkut(Gtk.Application):
         self._previous_window = self.backend.focused_window() if self.backend else None
         release_selects = bool(held and not self.config.settings.sticky and self.backend)
         timestamp = self.backend.last_event_time if held and self.backend else Gtk.get_current_event_time()
-        self.popup.open(self.recent_clips(), release_selects, timestamp)
+        selected_id = self._last_selected_clip_id if self.config.settings.resume_last_selection else None
+        self.popup.open(self.recent_clips(), release_selects, timestamp, selected_id)
         if release_selects:
             self._release_source = GLib.timeout_add(25, self._check_release)
 
@@ -214,6 +218,7 @@ class Jumpkut(Gtk.Application):
         self.select_clip(selected, self._previous_window)
 
     def select_clip(self, selected, target):
+        self._last_selected_clip_id = selected.id
         self._ignore_text = selected.text
         self.clipboard.set_text(selected.text, -1)
         self._remove_source("_paste_source")
@@ -242,6 +247,8 @@ class Jumpkut(Gtk.Application):
         self._history_changed()
 
     def _history_changed(self):
+        if self._last_selected_clip_id and self.history.get(self._last_selected_clip_id) is None:
+            self._last_selected_clip_id = None
         self._update_tooltip()
         if self.history_window:
             self.history_window.refresh()
