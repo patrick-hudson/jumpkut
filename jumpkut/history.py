@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Callable
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,13 +30,28 @@ class History:
     stored data is preserved before a subsequent write can replace it.
     """
 
-    def __init__(self, path: Path | None):
+    def __init__(self, path: Path | None, *, background: bool = False,
+                 on_save_error: Callable[[OSError], None] | None = None):
         self.path = Path(path) if path is not None else None
         self.load_error: str | None = None
         self._items: list[Clip] = []
         self._unsafe_to_overwrite = False
         if self.path is not None:
             self._load()
+        self._writer = (
+            _ArchiveWriter(lambda path, items: self._write(path, items), on_save_error)
+            if background and self.path else None
+        )
+
+    def flush(self) -> None:
+        """Wait for pending saves; report the last failure until a save succeeds."""
+        if self._writer:
+            self._writer.flush()
+
+    def close(self) -> None:
+        """Finish queued saves before releasing the writer on normal shutdown."""
+        if self._writer:
+            self._writer.close()
 
     @property
     def items(self) -> list[Clip]:
@@ -188,7 +206,10 @@ class History:
             return
         if self._unsafe_to_overwrite:
             raise OSError("Clipboard history could not be read or backed up; original will be preserved")
-        self._write(self.path, self._items)
+        if self._writer:
+            self._writer.submit(self.path, list(self._items))
+        else:
+            self._write(self.path, self._items)
 
     @classmethod
     def _write(cls, path: Path, items: list[Clip], *, private_parent: bool = True) -> None:
@@ -208,3 +229,70 @@ class History:
             os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
+
+
+class _ArchiveWriter:
+    """One ordered writer with at most one waiting snapshot of the full archive.
+
+    Clippings are immutable. Replacing a waiting snapshot retains all intervening
+    copies and deletions, while avoiding an unbounded queue during a copy burst.
+    The error callback runs on this worker; GTK callers must dispatch to the UI.
+    """
+
+    def __init__(self, write, on_error):
+        self._write = write
+        self._on_error = on_error
+        self._condition = threading.Condition()
+        self._pending = None
+        self._active = False
+        self._error = None
+        self._closed = False
+        self._thread = threading.Thread(target=self._run, name="jumpkut-archive", daemon=True)
+        self._thread.start()
+
+    def submit(self, path, items):
+        with self._condition:
+            if self._closed:
+                raise RuntimeError("Clipboard archive writer is closed")
+            self._pending = (path, items)
+            self._condition.notify_all()
+
+    def flush(self):
+        with self._condition:
+            while self._pending is not None or self._active:
+                self._condition.wait()
+            if self._error is not None:
+                raise self._error
+
+    def close(self):
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
+        self._thread.join()
+        self.flush()
+
+    def _run(self):
+        while True:
+            with self._condition:
+                while self._pending is None and not self._closed:
+                    self._condition.wait()
+                if self._pending is None:
+                    return
+                path, items = self._pending
+                self._pending = None
+                self._active = True
+            error = None
+            try:
+                self._write(path, items)
+            except Exception as exc:
+                error = exc if isinstance(exc, OSError) else OSError(str(exc))
+                if self._on_error:
+                    try:
+                        self._on_error(error)
+                    except Exception:
+                        logging.getLogger(__name__).exception("Archive error callback failed")
+            finally:
+                with self._condition:
+                    self._error = error
+                    self._active = False
+                    self._condition.notify_all()

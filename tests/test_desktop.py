@@ -141,8 +141,66 @@ class DesktopTests(unittest.TestCase):
         self.copy("second clip")
         self.copy("  café 🦊\nsecond line\t")
         self.assertEqual([clip.text for clip in self.app.history.items], ["  café 🦊\nsecond line\t", "second clip"])
+        self.app.history.flush()
         saved = json.loads((self.root / "data/jumpkut/history.json").read_text())
         self.assertEqual(saved["clips"][0]["text"], "  café 🦊\nsecond line\t")
+
+    def test_hotkey_opens_while_archive_save_is_blocked(self):
+        import threading
+        from unittest.mock import patch
+        from jumpkut.history import History
+
+        self.copy("previously saved")
+        self.app.history.flush()
+        before = self.app.history.path.read_bytes()
+        started, release = threading.Event(), threading.Event()
+        write = History._write
+
+        def slow_write(*args, **kwargs):
+            started.set()
+            if not release.wait(5):
+                raise OSError("test did not release writer")
+            return write(*args, **kwargs)
+
+        try:
+            with patch.object(History, "_write", side_effect=slow_write):
+                self.copy("available immediately while disk is busy")
+                self.assertTrue(started.wait(2))
+                self.open_hotkey()
+                self.assertEqual(self.app.popup.selected.text, "available immediately while disk is busy")
+                self.assertEqual(self.app.history.path.read_bytes(), before)
+                self.assertFalse(release.is_set(), "popup must open without waiting for disk")
+                release.set()
+                self.app.history.flush()
+        finally:
+            release.set()
+        self.assertEqual(History(self.app.history.path).items, self.app.history.items)
+
+    def test_large_full_history_refresh_yields_to_hotkey_and_keeps_all_rows(self):
+        from jumpkut.history import Clip
+
+        self.app.history.flush()
+        self.app.history._items = [Clip(f"{index:032x}", f"Archived clipping {index}", 1700000000.0 + index)
+                                   for index in range(10000)]
+        expected = [clip.id for clip in self.app.history.items]
+        self.app.show_full_history()
+        window = self.app.history_window
+        self.assertTrue(window._refresh_source, "large history must populate in batches")
+        observed = []
+        self.GLib.idle_add(lambda: observed.append(len(window.model)) or self.GLib.SOURCE_REMOVE,
+                           priority=self.GLib.PRIORITY_DEFAULT)
+        self.open_hotkey()
+        self.assertTrue(observed)
+        self.assertLess(observed[0], len(expected), "input must run before the entire archive is rebuilt")
+        self.assertEqual(self.app.popup.selected.id, expected[0])
+        deadline = time.monotonic() + 5
+        while window._refresh_source and time.monotonic() < deadline:
+            self.pump(0.01)
+        self.assertEqual([row[0] for row in window.model], expected)
+        window.hide()
+        self.app._history_changed()
+        self.assertEqual(window._refresh_source, 0, "hidden history must not schedule row rebuilding")
+        self.assertEqual([row[0] for row in window.model], expected)
 
     def test_about_and_preferences_show_running_version(self):
         from jumpkut import __version__

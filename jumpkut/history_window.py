@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from gi.repository import Gdk, Gtk, Pango
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 
 class FullHistory(Gtk.ApplicationWindow):
@@ -11,10 +11,12 @@ class FullHistory(Gtk.ApplicationWindow):
         self.app = app
         self._refreshing = False
         self._previewed = None
+        self._refresh_source = 0
         self.set_default_size(940, 620)
         self.set_size_request(720, 440)
         self.connect("key-press-event", self._key)
-        self.connect("destroy", lambda *_: setattr(app, "history_window", None))
+        self.connect("hide", lambda *_: self._cancel_refresh())
+        self.connect("destroy", self._destroy)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin=16)
         self.add(box)
@@ -94,32 +96,51 @@ class FullHistory(Gtk.ApplicationWindow):
         return self.app.history.get(model[iterator][0]) if iterator is not None else None
 
     def open(self):
-        self.refresh()
         self.show_all()
+        self.refresh()
         self.present()
         self.tree.grab_focus()
 
     def refresh(self):
-        selected = self.selected
-        selected_id = selected.id if selected else None
+        self._cancel_refresh()
+        if not self.get_visible():
+            return
         query = self.search.get_text().casefold()
         clips = self.app.history.items
+        model = Gtk.ListStore(str, str, str, int)
+        remaining = iter(enumerate(clips, 1))
+        paths = {}
+
+        def fill_batch():
+            for _ in range(64):
+                item = next(remaining, None)
+                if item is None:
+                    self._refresh_source = 0
+                    self._apply_model(model, paths, len(clips), query)
+                    return GLib.SOURCE_REMOVE
+                rank, clip = item
+                if query and query not in clip.text.casefold():
+                    continue
+                preview = " ".join(clip.text[:1000].split())
+                if len(preview) > 240 or len(clip.text) > 1000:
+                    preview = preview[:240] + "…"
+                try:
+                    copied = datetime.fromtimestamp(clip.created_at).strftime("%Y-%m-%d %H:%M")
+                except (OverflowError, OSError, ValueError):
+                    copied = "Unknown date"
+                iterator = model.append((clip.id, preview, copied, rank))
+                paths[clip.id] = model.get_path(iterator)
+            return GLib.SOURCE_CONTINUE
+
+        if fill_batch():
+            self._refresh_source = GLib.idle_add(fill_batch)
+
+    def _apply_model(self, model, paths, total, query):
+        selected = self.selected
+        selected_path = paths.get(selected.id) if selected else None
         self._refreshing = True
-        self.model.clear()
-        selected_path = None
-        for rank, clip in enumerate(clips, 1):
-            if query and query not in clip.text.casefold():
-                continue
-            preview = " ".join(clip.text[:1000].split())
-            if len(preview) > 240 or len(clip.text) > 1000:
-                preview = preview[:240] + "…"
-            try:
-                copied = datetime.fromtimestamp(clip.created_at).strftime("%Y-%m-%d %H:%M")
-            except (OverflowError, OSError, ValueError):
-                copied = "Unknown date"
-            iterator = self.model.append((clip.id, preview, copied, rank))
-            if clip.id == selected_id:
-                selected_path = self.model.get_path(iterator)
+        self.model = model
+        self.tree.set_model(model)
         self._refreshing = False
 
         if len(self.model):
@@ -127,10 +148,19 @@ class FullHistory(Gtk.ApplicationWindow):
             self.tree.set_cursor(path)
             self.tree.scroll_to_cell(path, None, False, 0, 0)
         self.count.set_text(
-            f"Showing {len(self.model)} of {len(clips)} clippings"
-            if query else f"{len(clips)} clippings · newest first"
+            f"Showing {len(self.model)} of {total} clippings"
+            if query else f"{total} clippings · newest first"
         )
         self._update_selection()
+
+    def _cancel_refresh(self):
+        if self._refresh_source:
+            GLib.source_remove(self._refresh_source)
+            self._refresh_source = 0
+
+    def _destroy(self, *_):
+        self._cancel_refresh()
+        self.app.history_window = None
 
     def _selection_changed(self, *_):
         if not self._refreshing:
