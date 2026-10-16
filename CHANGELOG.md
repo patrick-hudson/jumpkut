@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-16
+
+### Fixed
+
+- Keep Alt+C responsive while saving clipboard history with an ordered background writer that finishes pending saves on normal exit. Archive and backup bytes, preferences, and complete history are preserved.
+- Populate Full History in small batches and skip hidden-window rebuilds so large archives do not block clipboard shortcuts. Search, selection, and all archived clippings remain available.
+
 ## [0.6.0] - 2026-10-10
 
 ### Added

@@ -2,14 +2,27 @@ import json
 import os
 import stat
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from jumpkut.history import History
+from jumpkut.history import Clip, History
 
 
 class HistoryTests(unittest.TestCase):
+    def test_archive_bytes_match_the_existing_json_format(self):
+        from dataclasses import asdict
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            clips = [Clip("first", '  café 🦊\n第二行\t"\\ ', 1700000000.125),
+                     Clip("second", "e\u0301\r\n\u2028", 1e-7)]
+            History._write(path, clips)
+            expected = json.dumps({"version": 1, "clips": [asdict(clip) for clip in clips]},
+                                  ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+            self.assertEqual(path.read_bytes(), expected.encode("utf-8"))
+
     def test_ignores_blank_text_and_preserves_content(self):
         history = History(None)
         self.assertIsNone(history.add(""))
@@ -254,6 +267,147 @@ class HistoryTests(unittest.TestCase):
             History(path)
             backup = next(parent.glob("history.json.corrupt-*"))
             self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
+
+
+class BackgroundHistoryTests(unittest.TestCase):
+    def test_shutdown_waits_for_active_and_pending_saves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            history = History(path, background=True)
+            started, release = threading.Event(), threading.Event()
+            closing, closed = threading.Event(), threading.Event()
+            errors = []
+            write = History._write
+
+            def slow_write(*args, **kwargs):
+                started.set()
+                if not release.wait(3):
+                    raise OSError("test did not release writer")
+                return write(*args, **kwargs)
+
+            def close():
+                closing.set()
+                try:
+                    history.close()
+                except Exception as error:
+                    errors.append(error)
+                finally:
+                    closed.set()
+
+            closer = threading.Thread(target=close)
+            try:
+                with patch.object(History, "_write", side_effect=slow_write):
+                    history.add("active save")
+                    self.assertTrue(started.wait(2))
+                    history.add("pending save")
+                    closer.start()
+                    self.assertTrue(closing.wait(2))
+                    self.assertFalse(closed.wait(0.05), "shutdown must wait while the write is blocked")
+                    release.set()
+                    closer.join(3)
+                    self.assertFalse(closer.is_alive())
+                self.assertEqual(errors, [])
+                self.assertEqual(History(path).items, history.items)
+            finally:
+                release.set()
+                if closer.ident is not None:
+                    closer.join(3)
+                history.close()
+
+    def test_slow_save_allows_copies_and_latest_snapshot_keeps_every_clipping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            original = History(path)
+            original.add("original")
+            before = path.read_bytes()
+            history = History(path, background=True)
+            self.assertEqual(path.read_bytes(), before, "loading must not rewrite history")
+            started, release = threading.Event(), threading.Event()
+            write = History._write
+
+            def slow_write(*args, **kwargs):
+                if threading.current_thread() is threading.main_thread():
+                    return write(*args, **kwargs)
+                started.set()
+                if not release.wait(3):
+                    raise OSError("test did not release writer")
+                return write(*args, **kwargs)
+
+            try:
+                with patch.object(History, "_write", side_effect=slow_write):
+                    history.add("first")
+                    self.assertTrue(started.wait(2))
+                    history.add("  café 🦊\r\nsecond\t ")
+                    history.add("third")
+                    self.assertEqual(len(history), 4)
+                    self.assertEqual(path.read_bytes(), before)
+                    backup = Path(directory) / "backup.json"
+                    history.export_to(backup)
+                    self.assertEqual(History(backup).items, history.items)
+                    release.set()
+                    history.flush()
+                self.assertEqual(History(path).items, history.items)
+            finally:
+                release.set()
+                history.close()
+
+    def test_pending_save_cannot_resurrect_deleted_or_cleared_clippings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            history = History(path, background=True)
+            started, release = threading.Event(), threading.Event()
+            write = History._write
+
+            def slow_write(*args, **kwargs):
+                started.set()
+                if not release.wait(3):
+                    raise OSError("test did not release writer")
+                return write(*args, **kwargs)
+
+            try:
+                with patch.object(History, "_write", side_effect=slow_write):
+                    first = history.add("first")
+                    self.assertTrue(started.wait(2))
+                    history.add("second")
+                    history.remove(first.id)
+                    history.clear()
+                    history.add("kept after clear")
+                    release.set()
+                    history.close()
+                self.assertEqual([clip.text for clip in History(path).items], ["kept after clear"])
+            finally:
+                release.set()
+                history.close()
+
+    def test_failed_background_write_preserves_disk_and_memory_and_can_recover(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            History(path).add("saved")
+            before = path.read_bytes()
+            errors = []
+            history = History(path, background=True, on_save_error=errors.append)
+            try:
+                with patch.object(History, "_write", side_effect=OSError("test disk failure")):
+                    history.add("available in memory")
+                    with self.assertRaisesRegex(OSError, "test disk failure"):
+                        history.flush()
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(len(history), 2)
+                self.assertTrue(errors)
+                history.add("recovered")
+                history.flush()
+                self.assertEqual(History(path).items, history.items)
+            finally:
+                history.close()
+
+    def test_background_mode_without_persistence_never_writes(self):
+        history = History(None, background=True)
+        with patch.object(History, "_write") as write:
+            history.add("temporary clipping")
+            history.flush()
+            history.close()
+        write.assert_not_called()
+        self.assertEqual(history.items[0].text, "temporary clipping")
 
 
 if __name__ == "__main__":

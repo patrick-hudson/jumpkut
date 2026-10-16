@@ -49,7 +49,8 @@ class Jumpkut(Gtk.Application):
         Gtk.Window.set_default_icon_from_file(str(Path(__file__).resolve().parent / "assets" / "jumpkut.svg"))
         self.hold()
         self.config = Config()
-        self.history = History(data_path() if self.config.settings.persist else None)
+        self.history = History(data_path() if self.config.settings.persist else None,
+                               background=True, on_save_error=self._history_save_error)
         self.clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         self.clipboard.connect("owner-change", self._owner_changed)
         self._bind_hotkey(self.config.settings.hotkey)
@@ -86,7 +87,18 @@ class Jumpkut(Gtk.Application):
             self.backend.close()
         if self.tray:
             self.tray.set_visible(False)
+        try:
+            self.history.close()
+        except OSError as exc:
+            self.notify(f"History could not be saved before exit: {exc}")
         Gtk.Application.do_shutdown(self)
+
+    def _history_save_error(self, error):
+        def report():
+            self.notify(f"History is available in memory, but could not be saved: {error}")
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(report)
 
     def _quit_signal(self):
         self.quit()
