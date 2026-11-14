@@ -725,6 +725,24 @@ class _PortalKeyboard:
         self._close_session()
 
 
+_KEYBOARD: _PortalKeyboard | None = None
+
+
+def _shared_keyboard(bus, on_error: Callable[[str], None]) -> _PortalKeyboard:
+    """One input session per process.
+
+    KDE posts a "remote control" notice each time a session starts, so the
+    session is kept across backend rebuilds (for example a shortcut change)
+    and ends only when auto-paste is turned off or Jumpkut exits.
+    """
+    global _KEYBOARD
+    if _KEYBOARD is None or _KEYBOARD._bus is not bus:
+        _KEYBOARD = _PortalKeyboard(bus, on_error)
+    else:
+        _KEYBOARD._on_error = on_error
+    return _KEYBOARD
+
+
 class KdeWaylandBackend:
     """The X11Backend interface, implemented with KDE Plasma session services."""
 
@@ -759,7 +777,7 @@ class KdeWaylandBackend:
             self._qt_key = qt_key_code(key_name, self.modifiers)
             self._shortcut = _GlobalShortcut(self._bus, self._qt_key, label, self._pressed)
             self._windows = _ActiveWindows(self._bus)
-            self._keyboard = _PortalKeyboard(self._bus, self._keyboard_error)
+            self._keyboard = _shared_keyboard(self._bus, self._keyboard_error)
         except GLib.Error as exc:
             self.close()
             raise RuntimeError(f"KDE session services are unavailable: {exc.message}") from exc
@@ -863,7 +881,8 @@ class KdeWaylandBackend:
         if self._closed:
             return
         self._closed = True
-        for part in (self._shortcut, self._windows, self._keyboard):
+        # The input session outlives this backend (see _shared_keyboard).
+        for part in (self._shortcut, self._windows):
             if part is not None:
                 try:
                     part.close()

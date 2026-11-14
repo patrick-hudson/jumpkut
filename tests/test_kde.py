@@ -552,6 +552,26 @@ class PortalLifecycleTests(unittest.TestCase):
         self.assertEqual([method for method, _path in bus.calls], ["CreateSession", "SelectDevices"])
 
 
+class SharedInputSessionTests(unittest.TestCase):
+    def test_backend_rebuilds_reuse_one_input_session(self):
+        # KDE shows a notice per session start; a shortcut change must not.
+        bus = FakeBus()
+        with patch.object(kde, "_KEYBOARD", None):
+            first_errors, second_errors = [], []
+            keyboard = kde._shared_keyboard(bus, first_errors.append)
+            keyboard.start()
+            old = backend({}, keyboard)
+            old._shortcut = old._windows = None
+            old.close()
+            self.assertTrue(keyboard.starting)  # Closing the backend kept the session.
+            again = kde._shared_keyboard(bus, second_errors.append)
+            self.assertIs(again, keyboard)
+            again.start()  # Already starting: no second CreateSession.
+            self.assertEqual([method for method, _path in bus.calls], ["CreateSession"])
+            again._on_error("denied")
+            self.assertEqual((first_errors, second_errors), ([], ["denied"]))
+
+
 class ActiveWindowSetupTests(unittest.TestCase):
     def test_failed_script_load_unregisters_the_report_object(self):
         bus = FakeBus()
