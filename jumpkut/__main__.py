@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -22,6 +23,29 @@ def parser():
     commands.add_argument("--about", action="store_true", help="show the application version and credits")
     commands.add_argument("--quit", action="store_true", help="quit the running instance")
     return result
+
+
+def is_kde_wayland(environ=None) -> bool:
+    environ = os.environ if environ is None else environ
+    desktops = environ.get("XDG_CURRENT_DESKTOP", "").split(":")
+    return environ.get("XDG_SESSION_TYPE") == "wayland" and "KDE" in desktops
+
+
+def wayland_problem(environ=None) -> str | None:
+    """Explain why this Wayland session cannot run Jumpkut, if it cannot."""
+    environ = os.environ if environ is None else environ
+    if environ.get("XDG_SESSION_TYPE") != "wayland":
+        return None
+    if not is_kde_wayland(environ):
+        return ("On Wayland, Jumpkut currently supports KDE Plasma. "
+                "On other desktops, choose an X11 session at login.")
+    if not environ.get("DISPLAY"):
+        return "Jumpkut needs XWayland on KDE Plasma, but DISPLAY is not set."
+    missing = [name for name in ("wl-copy", "wl-paste") if shutil.which(name, path=environ.get("PATH")) is None]
+    if missing:
+        return ("Jumpkut needs wl-clipboard on Wayland (missing " + ", ".join(missing) + ").\n"
+                "On Fedora: sudo dnf install wl-clipboard")
+    return None
 
 
 def start_background():
@@ -60,9 +84,14 @@ def main(argv=None):
     if not argv:
         argv = ["--background"]
     options = parser().parse_args(argv)
-    if os.environ.get("XDG_SESSION_TYPE") == "wayland":
-        print("Jumpkut currently requires an X11 desktop session. Choose an X11 session at login.", file=sys.stderr)
+    problem = wayland_problem()
+    if problem:
+        print(problem, file=sys.stderr)
         return 1
+    if is_kde_wayland():
+        # GTK runs through XWayland for the tray icon and popup placement;
+        # KDE services replace the X11 shortcut, clipboard, and paste paths.
+        os.environ["GDK_BACKEND"] = "x11"
     try:
         import gi
         gi.require_version("Gtk", "3.0")

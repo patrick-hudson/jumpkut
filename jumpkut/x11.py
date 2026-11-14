@@ -54,6 +54,10 @@ class X11Backend:
     selected history entry and let the user paste it normally.
     """
 
+    # X11 focus is synchronous, and XQueryKeymap works without focus.
+    focus_may_lag = False
+    reads_modifiers_from_focus = False
+
     def __init__(self, key_name: str, modifiers: set[str], on_hotkey: Callable[[], None]):
         self.key_name = key_name
         self.modifiers = frozenset(modifiers)
@@ -94,6 +98,9 @@ class X11Backend:
         except Exception:
             self.close()
             raise
+
+    def prepare_paste(self, _enabled: bool) -> None:
+        """XTEST needs no setup; present for parity with the Wayland backend."""
 
     def _record_error(self, message: str) -> None:
         self.last_error = message

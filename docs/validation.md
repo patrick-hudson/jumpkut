@@ -54,4 +54,4 @@ The quick bezel, tray menu, Preferences, Full History, and About dialog were vis
 
 No linter or static type checker is configured. GTK 3 emits deprecation warnings for its legacy tray API; Cinnamon supports that protocol. Automatic terminal paste selects a chord from common terminal window classes.
 
-This release supports text history on X11. Native Wayland needs a different clipboard and global-shortcut backend.
+This release supports text history on X11 and on KDE Plasma 6 Wayland. The KDE backend's shortcut encoding, clipboard framing, active-window reports, and paste safety have headless tests; its KGlobalAccel registration, KWin active-window script, and wl-clipboard recording were checked manually on Fedora 45 KDE (Plasma 6.8). Other Wayland desktops are not supported.

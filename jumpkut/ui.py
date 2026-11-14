@@ -80,11 +80,22 @@ class Popup(Gtk.ApplicationWindow):
         self.hint.set_text("↑ ↓ cycle   ·   Release modifiers to select   ·   Esc cancel" if release_selects else "↑ ↓ cycle   ·   Enter select   ·   Delete remove   ·   Esc cancel")
         self.render()
         self.show_all()
-        self.present_with_time(timestamp or Gtk.get_current_event_time())
+        self.present_with_time(timestamp or Gtk.get_current_event_time() or self._server_time())
         self.grab_focus()
 
+    def _server_time(self):
+        # Without an input event timestamp (KDE Wayland shortcuts), a fresh X
+        # server time keeps KWin's focus-stealing prevention satisfied.
+        try:
+            from gi.repository import GdkX11
+            return GdkX11.x11_get_server_time(self.get_window())
+        except (ImportError, TypeError, AttributeError):
+            return Gdk.CURRENT_TIME
+
     def _grab_keyboard(self, *_):
-        if not self.get_visible():
+        backend = self.app.backend
+        if not self.get_visible() or (backend and backend.reads_modifiers_from_focus):
+            # Under XWayland a grab cannot keep keys from KWin, so skip it.
             return False
         # Keep Alt+Escape and repeated shortcut keys out of the WM's bindings.
         # Wait for the X11 map event: show_all() alone is not yet viewable.
@@ -160,7 +171,15 @@ class Popup(Gtk.ApplicationWindow):
         return False
 
     def _cancel_if_other_window_active(self):
-        if self.get_visible() and (not self.app.backend or self.app.backend.focused_window() != self.get_window().get_xid()):
+        backend = self.app.backend
+        if not backend:
+            other_window = True
+        elif backend.reads_modifiers_from_focus:
+            # KGlobalAccel does not grab the keyboard, so GTK's focus is exact.
+            other_window = not self.is_active()
+        else:
+            other_window = backend.focused_window() != self.get_window().get_xid()
+        if self.get_visible() and other_window:
             self.app.cancel_popup(restore=False)
         return GLib.SOURCE_REMOVE
 

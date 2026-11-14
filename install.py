@@ -12,17 +12,22 @@ import sys
 import tempfile
 
 from jumpkut import __version__
+from jumpkut.__main__ import is_kde_wayland, wayland_problem
 from jumpkut.settings import _quote_exec_argument
 
 
 def check_dependencies() -> None:
+    # KDE Plasma Wayland uses wl-clipboard and session D-Bus services instead
+    # of python-xlib, which is then only needed for X11 sessions.
+    kde_wayland = is_kde_wayland()
     check = subprocess.run(
         [
             "/usr/bin/python3",
             "-c",
             "import sys; assert sys.version_info >= (3, 10); "
             "import gi; gi.require_version('Gtk', '3.0'); "
-            "from gi.repository import Gtk; import Xlib",
+            "from gi.repository import Gtk"
+            + ("" if kde_wayland else "; import Xlib"),
         ],
         capture_output=True,
         text=True,
@@ -32,8 +37,12 @@ def check_dependencies() -> None:
             "Jumpkut needs Python 3.10+, GTK 3, PyGObject, and python-xlib "
             "for /usr/bin/python3.\n"
             "On Mint/Ubuntu: sudo apt install python3-gi gir1.2-gtk-3.0 python3-xlib librsvg2-common\n"
+            "On Fedora: sudo dnf install python3-gobject gtk3 python3-xlib librsvg2\n"
             + check.stderr.strip()
         )
+    problem = wayland_problem()
+    if problem:
+        raise RuntimeError(problem)
 
 
 def install(prefix: Path) -> Path:

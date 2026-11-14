@@ -1,6 +1,6 @@
 # Contributing to Jumpkut
 
-Bug reports, small fixes, and thoughtful feature proposals are welcome. Jumpkut is a native GTK 3 clipboard manager for Linux on X11; the quick picker, tray menu, and Full History have separate roles.
+Bug reports, small fixes, and thoughtful feature proposals are welcome. Jumpkut is a native GTK 3 clipboard manager for Linux on X11 and KDE Plasma Wayland; the quick picker, tray menu, and Full History have separate roles.
 
 ## Get started
 
@@ -40,7 +40,7 @@ Add a focused regression test for behavior changes. Use synthetic clipboard text
 
 ## Open an issue or pull request
 
-For bugs, include the Jumpkut version, distribution, desktop environment, session type, and steps to reproduce with sample text. Explain what you expected and what happened. Native Wayland support is not currently implemented.
+For bugs, include the Jumpkut version, distribution, desktop environment, session type, and steps to reproduce with sample text. Explain what you expected and what happened. Wayland is supported on KDE Plasma only (`jumpkut/kde.py`).
 
 For a pull request, describe the problem, the resulting behavior, and the checks you ran. Preserve stored history and preferences during updates. Keep **Alt+C** as the quick popup and **Show Full History** as the separate browser. Quick and tray limits must never trim the full archive.
 
