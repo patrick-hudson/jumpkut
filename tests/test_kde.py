@@ -2,6 +2,10 @@
 
 import base64
 import os
+from pathlib import Path
+import subprocess
+import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -11,8 +15,19 @@ import gi
 gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 
+from gi.repository import GLib
+
 from jumpkut import kde
 from jumpkut.__main__ import is_kde_wayland, wayland_problem
+
+
+def run_loop_until(condition, timeout=5.0):
+    context = GLib.MainContext.default()
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        context.iteration(False)
+        time.sleep(0.005)
+    return condition()
 
 
 class FakeKeyboard:
@@ -29,6 +44,7 @@ class FakeKeyboard:
 def backend(active, keyboard=None, owners=None):
     result = kde.KdeWaylandBackend.__new__(kde.KdeWaylandBackend)
     result._closed = False
+    result._qt_key = kde.qt_key_code("c", {"Alt"})
     result._keyboard = keyboard or FakeKeyboard()
     result._windows = SimpleNamespace(active=active, owners=owners or {})
     return result
@@ -67,10 +83,24 @@ class ClipboardFramingTests(unittest.TestCase):
         self.assertEqual(kde.parse_watch_line("nil"), ("nil", None))
         self.assertEqual(kde.parse_watch_line("data not*base64"), ("invalid", None))
 
-    def test_watch_script_marks_password_manager_types_sensitive(self):
-        for mime in ("x-kde-passwordManagerHint", "application/x-nspasteboard-concealed-type",
-                     "application/x-keepassxc-secret"):
-            self.assertIn(mime, kde._WATCH_SCRIPT)
+    def watch(self, state, text):
+        environment = {"PATH": os.environ["PATH"]}
+        if state is not None:
+            environment["CLIPBOARD_STATE"] = state
+        return subprocess.run(["sh", "-c", kde._WATCH_SCRIPT], input=text.encode(), env=environment,
+                              capture_output=True, check=True, timeout=5).stdout.decode()
+
+    def test_watch_script_emits_text_only_for_the_data_state(self):
+        line = self.watch("data", "a\nb")
+        self.assertEqual(kde.parse_watch_line(line.rstrip("\n")), ("data", "a\nb"))
+
+    def test_watch_script_fails_closed_for_sensitive_unknown_and_unset_states(self):
+        # wl-paste reports sensitivity from the same offer that feeds stdin;
+        # without a state (old wl-clipboard) nothing may be recorded.
+        self.assertEqual(self.watch("sensitive", "hunter2"), "sensitive\n")
+        self.assertEqual(self.watch("someday", "hunter2"), "someday\n")
+        self.assertEqual(self.watch(None, "hunter2"), "unknown\n")
+        self.assertNotIn("--list-types", kde._WATCH_SCRIPT)
 
     def test_kwin_script_strings_are_quoted(self):
         script = kde._ACTIVATE_SCRIPT % {"target": kde._js_string('{x"); evil(); ("}')}
@@ -101,6 +131,20 @@ class PasteSafetyTests(unittest.TestCase):
         unready = FakeKeyboard(ready=False)
         self.assertFalse(backend({"id": "{a}", "class": "x", "pid": "1"}, unready).paste("{a}"))
         self.assertEqual(unready.taps, [])
+
+    def test_never_types_its_own_shortcut(self):
+        errors = []
+        keyboard = FakeKeyboard()
+        subject = backend({"id": "{a}", "class": "konsole", "pid": "1"}, keyboard)
+        subject._qt_key = kde.qt_key_code("v", {"Control", "Shift"})
+        subject._reported_conflict = False
+        subject._keyboard_error = errors.append
+        self.assertFalse(subject.paste("{a}"))
+        self.assertFalse(subject.paste("{a}"))
+        self.assertEqual(keyboard.taps, [])
+        self.assertEqual(len(errors), 1)
+        subject._windows.active["class"] = "org.mozilla.firefox"  # Ctrl+V is still free.
+        self.assertTrue(subject.paste("{a}"))
 
     def test_own_windows_are_recognised_by_process(self):
         subject = backend({}, owners={"{mine}": str(os.getpid()), "{theirs}": "1"})
@@ -160,7 +204,13 @@ class SessionDetectionTests(unittest.TestCase):
         with patch("jumpkut.__main__.shutil.which", return_value=None):
             self.assertIn("wl-clipboard", wayland_problem({**kde_session, "DISPLAY": ":0"}))
         with patch("jumpkut.__main__.shutil.which", return_value="/usr/bin/wl-paste"):
-            self.assertIsNone(wayland_problem({**kde_session, "DISPLAY": ":0"}))
+            with patch("jumpkut.__main__.wl_clipboard_version", return_value=(2, 3, 0)):
+                self.assertIsNone(wayland_problem({**kde_session, "DISPLAY": ":0"}))
+            # 2.2.x never reports password-manager copies as sensitive.
+            with patch("jumpkut.__main__.wl_clipboard_version", return_value=(2, 2, 1)):
+                self.assertIn("2.3.0 or newer", wayland_problem({**kde_session, "DISPLAY": ":0"}))
+            with patch("jumpkut.__main__.wl_clipboard_version", return_value=None):
+                self.assertIn("unknown version", wayland_problem({**kde_session, "DISPLAY": ":0"}))
 
 
 class WaylandRecordingTests(unittest.TestCase):
@@ -187,6 +237,186 @@ class WaylandRecordingTests(unittest.TestCase):
         self.assertEqual(added, ["one"])
         self.assertIsNone(app._ignore_text)
         self.assertIsNone(app._last_selected_clip_id)
+
+
+
+class AcceptWhileModifiersHeldTests(unittest.TestCase):
+    def test_enter_with_a_held_modifier_waits_for_release(self):
+        from jumpkut.app import Jumpkut
+        held = [True]
+        accepted = []
+        popup = SimpleNamespace(get_visible=lambda: True, is_active=lambda: True, selected=None)
+        app = SimpleNamespace(
+            backend=SimpleNamespace(reads_modifiers_from_focus=True, any_modifier_down=lambda: held[0]),
+            config=SimpleNamespace(settings=SimpleNamespace(auto_paste=True)),
+            popup=popup, _accept_source=0,
+            cancel_popup=lambda restore=True: accepted.append(restore),
+        )
+        app._paste_waits_for_modifiers = lambda: Jumpkut._paste_waits_for_modifiers(app)
+        app.accept_popup = lambda: Jumpkut.accept_popup(app)
+        app._accept_when_released = lambda: Jumpkut._accept_when_released(app)
+        app.accept_popup()
+        self.assertNotEqual(app._accept_source, 0)
+        self.assertEqual(accepted, [])
+        held[0] = False
+        self.assertTrue(run_loop_until(lambda: accepted))
+        self.assertEqual(app._accept_source, 0)
+
+
+class ClipboardPublicationTests(unittest.TestCase):
+    """Drive WaylandClipboard against fake wl-paste/wl-copy executables."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.bin = Path(self.directory.name)
+        self.log = self.bin / "copies.log"
+        self.write_tool("wl-paste", "exec sleep 30\n")
+        path = patch.dict(os.environ, {"PATH": f"{self.bin}:{os.environ['PATH']}"})
+        path.start()
+        self.addCleanup(path.stop)
+
+    def write_tool(self, name, body):
+        tool = self.bin / name
+        tool.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        tool.chmod(0o755)
+
+    def clipboard(self):
+        failures = []
+        clip = kde.WaylandClipboard(lambda state, text: None, failures.append)
+        self.addCleanup(clip.close)
+        return clip, failures
+
+    def test_confirmed_publication_is_done(self):
+        self.write_tool("wl-copy", f"cat >> {self.log}; exec sleep 30\n")
+        clip, failures = self.clipboard()
+        clip.set_text("chosen")
+        self.assertEqual(clip.publish_state, "pending")
+        self.assertTrue(run_loop_until(lambda: self.log.exists() and self.log.read_text() == "chosen"))
+        clip._handle_line("data " + base64.b64encode(b"other").decode())
+        self.assertEqual(clip.publish_state, "pending")
+        clip._handle_line("data " + base64.b64encode(b"chosen").decode())
+        self.assertEqual(clip.publish_state, "done")
+        self.assertEqual(failures, [])
+        clip._publisher[0].force_exit()
+
+    def test_failed_wl_copy_is_not_success(self):
+        self.write_tool("wl-copy", "cat >/dev/null; exit 3\n")
+        clip, failures = self.clipboard()
+        clip.set_text("chosen")
+        self.assertTrue(run_loop_until(lambda: clip.publish_state != "pending"))
+        self.assertEqual(clip.publish_state, "failed")
+        self.assertIn("status 3", failures[0])
+
+    def test_unconfirmed_publication_times_out_as_failure(self):
+        self.write_tool("wl-copy", "cat >/dev/null; exec sleep 30\n")
+        clip, failures = self.clipboard()
+        clip.CONFIRM_TIMEOUT_MS = 50
+        clip.set_text("chosen")
+        self.assertTrue(run_loop_until(lambda: clip.publish_state != "pending"))
+        self.assertEqual(clip.publish_state, "failed")
+        self.assertIn("in time", failures[0])
+        clip._publisher[0].force_exit()
+
+    def test_newer_selection_stops_an_unconfirmed_publisher_before_starting(self):
+        self.write_tool("wl-copy", f"text=$(cat); echo \"start $text\" >> {self.log}; exec sleep 30\n")
+        clip, failures = self.clipboard()
+        clip.set_text("first")
+        self.assertTrue(run_loop_until(lambda: self.log.exists() and "first" in self.log.read_text()))
+        first = clip._publisher[0]
+        clip.set_text("second")
+        self.assertTrue(run_loop_until(lambda: "second" in self.log.read_text()))
+        self.assertTrue(first.get_if_signaled())
+        self.assertEqual(self.log.read_text().splitlines(), ["start first", "start second"])
+        self.assertEqual(clip.publish_state, "pending")
+        self.assertEqual(failures, [])
+        clip._publisher[0].force_exit()
+
+
+class FakeBus:
+    def __init__(self):
+        self.calls = []
+        self.subscriptions = {}
+        self.next_subscription = 0
+        self.registered = []
+
+    def get_unique_name(self):
+        return ":1.42"
+
+    def signal_subscribe(self, _sender, _interface, _member, path, _arg0, _flags, callback, _data):
+        self.next_subscription += 1
+        self.subscriptions[self.next_subscription] = (path, callback)
+        return self.next_subscription
+
+    def signal_unsubscribe(self, subscription):
+        self.subscriptions.pop(subscription, None)
+
+    def call(self, _name, path, _interface, method, *_rest):
+        self.calls.append((method, path))
+
+    def call_sync(self, _name, path, _interface, method, *_rest):
+        self.calls.append((method, path))
+        if method == "loadScript":
+            return GLib.Variant("(i)", (-1,))
+        return GLib.Variant("()", ())
+
+    def respond(self, code, results):
+        for path, callback in list(self.subscriptions.values()):
+            callback(self, ":1.1", path, None, "Response", SimpleNamespace(unpack=lambda: (code, results)), None)
+
+    def register_object(self, *_args):
+        self.registered.append("object")
+        return 7
+
+    def unregister_object(self, registration):
+        self.registered.remove("object")
+
+
+class PortalLifecycleTests(unittest.TestCase):
+    def test_close_cancels_a_pending_start(self):
+        bus = FakeBus()
+        keyboard = kde._PortalKeyboard(bus, lambda message: None)
+        keyboard.start()
+        self.assertTrue(keyboard.starting)
+        keyboard.close()
+        self.assertFalse(keyboard.starting)
+        self.assertEqual(bus.subscriptions, {})
+        keyboard.start()  # A later start is allowed again.
+        self.assertTrue(keyboard.starting)
+
+    def test_stale_response_closes_its_session(self):
+        bus = FakeBus()
+        keyboard = kde._PortalKeyboard(bus, lambda message: None)
+        keyboard.start()
+        (path, callback), = bus.subscriptions.values()
+        keyboard.close()
+        callback(bus, ":1.1", path, None, "Response",
+                 SimpleNamespace(unpack=lambda: (0, {"session_handle": "/session/late"})), None)
+        self.assertIn(("Close", "/session/late"), bus.calls)
+        self.assertNotIn("SelectDevices", [method for method, _path in bus.calls])
+        self.assertIsNone(keyboard._session)
+        self.assertFalse(keyboard.ready)
+
+    def test_current_response_continues_the_session(self):
+        bus = FakeBus()
+        keyboard = kde._PortalKeyboard(bus, lambda message: None)
+        keyboard.start()
+        bus.respond(0, {"session_handle": "/session/now"})
+        self.assertEqual(keyboard._session, "/session/now")
+        self.assertEqual([method for method, _path in bus.calls], ["CreateSession", "SelectDevices"])
+
+
+class ActiveWindowSetupTests(unittest.TestCase):
+    def test_failed_script_load_unregisters_the_report_object(self):
+        bus = FakeBus()
+        bus.call_sync = lambda _name, path, _interface, method, *_rest: (
+            GLib.Variant("(s)", (":1.16",)) if method == "GetNameOwner"
+            else GLib.Variant("(i)", (-1,)) if method == "loadScript" else GLib.Variant("()", ())
+        )
+        with tempfile.TemporaryDirectory() as runtime, patch.dict(os.environ, {"XDG_RUNTIME_DIR": runtime}):
+            with self.assertRaises(RuntimeError):
+                kde._ActiveWindows(bus)
+        self.assertEqual(bus.registered, [])
 
 
 if __name__ == "__main__":

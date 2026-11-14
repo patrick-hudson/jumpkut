@@ -39,4 +39,4 @@ Pushes, pull requests, and manual runs build packages and save them as a `linux-
 
 Only after the build succeeds does a separate job publish the installers and `SHA256SUMS` to the matching GitHub release. New releases start as drafts, become public after all assets upload, and use the version's changelog notes. Tagged reruns replace package assets on that release. Build jobs have read access; the publishing job alone has write access.
 
-Wayland is supported on KDE Plasma 6, where the packages recommend `wl-clipboard`. Native package architectures describe the Python payload; the AppImage currently targets x86_64 only.
+Wayland is supported on KDE Plasma 6, where the packages recommend `wl-clipboard` 2.3 or newer. Native package architectures describe the Python payload; the AppImage currently targets x86_64 only.

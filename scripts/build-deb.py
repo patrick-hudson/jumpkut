@@ -33,7 +33,7 @@ def build(output_dir: Path) -> Path:
             "Section: utils\nPriority: optional\n"
             f"Installed-Size: {installed_size}\nHomepage: {HOMEPAGE}\n"
             "Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, python3-xlib, librsvg2-common\n"
-            "Recommends: wl-clipboard\n"
+            "Recommends: wl-clipboard (>= 2.3.0)\n"
             "Description: Keyboard-first clipboard manager for Linux\n"
             " Jumpkut keeps a local text clipboard archive, an Alt+C quick picker,\n"
             " a system tray menu, a searchable history window, and JSON backups.\n"

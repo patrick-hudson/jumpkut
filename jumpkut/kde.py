@@ -56,6 +56,11 @@ _GDK_MODIFIER_MASKS = {
     "Alt": Gdk.ModifierType.MOD1_MASK,
     "Super": Gdk.ModifierType.SUPER_MASK | Gdk.ModifierType.MOD4_MASK,
 }
+_ANY_MODIFIER_MASK = int(
+    Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK
+    | Gdk.ModifierType.MOD3_MASK | Gdk.ModifierType.MOD4_MASK | Gdk.ModifierType.MOD5_MASK
+    | Gdk.ModifierType.SUPER_MASK | Gdk.ModifierType.HYPER_MASK | Gdk.ModifierType.META_MASK
+)
 _KEYSYMS = {"Control_L": 0xFFE3, "Shift_L": 0xFFE1, "v": 0x0076}
 _TERMINAL_CLASSES = frozenset(
     {
@@ -69,14 +74,14 @@ _TERMINAL_CLASSES = frozenset(
 )
 
 # Runs once per clipboard change, with the text on stdin. Base64 keeps every
-# clipping on one line, including multiline text.
-_WATCH_SCRIPT = r"""state=${CLIPBOARD_STATE:-data}
-if [ "$state" = data ]; then
-  case $(wl-paste --list-types 2>/dev/null) in
-    *x-kde-passwordManagerHint*|*application/x-nspasteboard-concealed-type*|*application/x-keepassxc-secret*) state=sensitive ;;
-  esac
-fi
-if [ "$state" = data ]; then printf 'data '; base64 -w0; else printf '%s' "$state"; cat >/dev/null; fi
+# clipping on one line, including multiline text. wl-paste (2.3+) sets
+# CLIPBOARD_STATE from the same offer that feeds stdin, including "sensitive"
+# for x-kde-passwordManagerHint. Anything but "data" is never recorded, so an
+# unset or unknown state fails closed.
+_WATCH_SCRIPT = r"""case ${CLIPBOARD_STATE:-unknown} in
+  data) printf 'data '; base64 -w0 ;;
+  *) printf '%s' "${CLIPBOARD_STATE:-unknown}"; cat >/dev/null ;;
+esac
 printf '\n'
 """
 
@@ -124,6 +129,11 @@ def qt_key_code(key_name: str, modifiers) -> int:
     return key
 
 
+def paste_chord(terminal: bool) -> int:
+    """The Qt key code of the paste shortcut typed into a target."""
+    return qt_key_code("v", {"Control", "Shift"} if terminal else {"Control"})
+
+
 def is_terminal_class(resource_class: str | None) -> bool:
     return bool(resource_class and resource_class.lower() in _TERMINAL_CLASSES)
 
@@ -160,10 +170,21 @@ def restore_token_path() -> Path:
 class WaylandClipboard:
     """Watch and set the Wayland clipboard through wl-clipboard."""
 
-    def __init__(self, on_change: Callable[[str, str | None], None]):
+    CONFIRM_TIMEOUT_MS = 1500
+
+    def __init__(self, on_change: Callable[[str, str | None], None],
+                 on_publish_failed: Callable[[str], None] | None = None):
         self.on_change = on_change
+        self.on_publish_failed = on_publish_failed or (lambda message: _LOG.error(message))
         self.last_state: tuple[str, str | None] | None = None
-        self.pending_text: str | None = None
+        # "idle", "pending" (wl-copy has not been seen to own the clipboard),
+        # "done", or "failed". Paste only after "done".
+        self.publish_state = "idle"
+        self._wanted: str | None = None
+        self._publish_generation = 0
+        self._confirmed_generation = 0
+        self._publisher = None  # (process, generation) of the newest live wl-copy.
+        self._confirm_id = 0
         self._process = None
         self._stream = None
         self._cancel = None
@@ -198,13 +219,18 @@ class WaylandClipboard:
             self._restart()
             return
         self._failures = 0
+        self._handle_line(line)
+        self._read()
+
+    def _handle_line(self, line: str) -> None:
         state, text = parse_watch_line(line)
         if state != "invalid":
             self.last_state = (state, text)
-            if text is not None and text == self.pending_text:
-                self.pending_text = None
+            if self.publish_state == "pending" and state == "data" and text == self._wanted:
+                self.publish_state = "done"
+                self._confirmed_generation = self._publish_generation
+                self._clear_confirm_timer()
             self.on_change(state, text)
-        self._read()
 
     def _restart(self) -> None:
         """Restart a watcher that exited, for example after a compositor restart."""
@@ -220,24 +246,76 @@ class WaylandClipboard:
             self.on_change(*self.last_state)
 
     def set_text(self, text: str) -> None:
-        self.pending_text = text
-        process = Gio.Subprocess.new(
-            ["wl-copy", "--type", "text/plain;charset=utf-8"],
-            Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
-        )
+        """Publish ``text``; the newest call always wins the clipboard."""
+        self._publish_generation += 1
+        generation = self._publish_generation
+        self._wanted = text
+        self.publish_state = "pending"
+        self._clear_confirm_timer()
+        self._confirm_id = GLib.timeout_add(self.CONFIRM_TIMEOUT_MS, self._confirm_timeout, generation)
+        previous, self._publisher = self._publisher, None
+        if previous is not None and previous[1] > self._confirmed_generation:
+            # An unconfirmed wl-copy could still take the clipboard after this
+            # one. Stop it, and start the new publisher only once it is gone.
+            process = previous[0]
+            process.force_exit()
+            process.wait_async(None, lambda _process, _result, _data: self._spawn(generation, text), None)
+        else:
+            # A confirmed publisher already owns the clipboard and exits by
+            # itself when the new one replaces it.
+            self._spawn(generation, text)
 
-        def done(proc, result, _data):
+    def _spawn(self, generation: int, text: str) -> None:
+        if generation != self._publish_generation or self._closed:
+            return
+        try:
+            # --foreground keeps the owning process ours, so it can be stopped.
+            process = Gio.Subprocess.new(
+                ["wl-copy", "--foreground", "--type", "text/plain;charset=utf-8"],
+                Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
+            )
+        except GLib.Error as exc:
+            self._fail(generation, f"wl-copy could not start: {exc.message}")
+            return
+        self._publisher = (process, generation)
+
+        def exited(proc, result, _data):
             try:
                 proc.communicate_finish(result)
+                reason = "wl-copy stopped before it owned the clipboard"
+                if not proc.get_successful():
+                    reason = f"wl-copy failed with status {proc.get_exit_status()}"
             except GLib.Error as exc:
-                _LOG.error("wl-copy failed: %s", exc.message)
-            # Do not wait forever for a watcher confirmation that may never come.
-            GLib.timeout_add(1000, lambda: setattr(self, "pending_text", None) if self.pending_text == text else None)
+                reason = f"wl-copy failed: {exc.message}"
+            if self._publisher and self._publisher[0] is proc:
+                self._publisher = None
+            # Exiting is normal once another copy replaces ours; before the
+            # watcher confirmed ownership it means the clipping is not there.
+            if self.publish_state == "pending":
+                self._fail(generation, reason)
 
-        process.communicate_async(GLib.Bytes.new(text.encode("utf-8")), None, done, None)
+        process.communicate_async(GLib.Bytes.new(text.encode("utf-8")), None, exited, None)
+
+    def _confirm_timeout(self, generation: int) -> bool:
+        self._confirm_id = 0
+        self._fail(generation, "wl-copy did not take the clipboard in time")
+        return GLib.SOURCE_REMOVE
+
+    def _clear_confirm_timer(self) -> None:
+        if self._confirm_id:
+            GLib.source_remove(self._confirm_id)
+            self._confirm_id = 0
+
+    def _fail(self, generation: int, reason: str) -> None:
+        if generation != self._publish_generation or self.publish_state != "pending":
+            return
+        self.publish_state = "failed"
+        self._clear_confirm_timer()
+        self.on_publish_failed(f"Could not copy the clipping: {reason}.")
 
     def close(self) -> None:
         self._closed = True
+        self._clear_confirm_timer()
         if self._restart_id:
             GLib.source_remove(self._restart_id)
             self._restart_id = 0
@@ -320,6 +398,16 @@ class _ActiveWindows:
         self._kwin_owner = owner
         info = Gio.DBusNodeInfo.new_for_xml(_WINDOWS_XML).interfaces[0]
         self._registration = bus.register_object(_WINDOWS_PATH, info, self._method, None, None)
+        try:
+            self._load_script()
+        except BaseException:
+            # The backend never sees a half-built tracker, so clean up here;
+            # a retry on this bus could not register the path otherwise.
+            self.close()
+            raise
+
+    def _load_script(self) -> None:
+        bus = self._bus
         script = _runtime_dir() / "active-window.js"
         script.write_text(
             _ACTIVE_WINDOW_SCRIPT % {
@@ -407,33 +495,44 @@ class _PortalKeyboard:
         self._on_error = on_error
         self._session = None
         self._requests = 0
+        # Bumped by start() and close(); responses from an older generation
+        # are stale and must not revive a closed or replaced session.
+        self._generation = 0
+        self._subscriptions: set[int] = set()
         self.ready = False
         self.starting = False
 
     def start(self) -> None:
         if self.ready or self.starting:
             return
+        self._generation += 1
         self.starting = True
         self._request("CreateSession", lambda token: GLib.Variant("(a{sv})", ({
             "handle_token": GLib.Variant("s", token),
-            "session_handle_token": GLib.Variant("s", f"jumpkut{os.getpid()}"),
+            "session_handle_token": GLib.Variant("s", f"{token}_session"),
         },)), self._created)
 
     def _request(self, method, parameters, on_success) -> None:
         self._requests += 1
+        generation = self._generation
         token = f"jumpkut{os.getpid()}_{self._requests}"
         sender = self._bus.get_unique_name()[1:].replace(".", "_")
         path = f"{_PORTAL_PATH}/request/{sender}/{token}"
         subscription = 0
 
         def response(_bus, _sender, _path, _interface, _signal, values, _data):
-            self._bus.signal_unsubscribe(subscription)
+            self._unsubscribe(subscription)
             code, results = values.unpack()
+            if generation != self._generation:
+                # A late answer for a session closed in the meantime.
+                if code == 0 and "session_handle" in results:
+                    self._close_handle(results["session_handle"])
+                return
             if code == 0:
                 on_success(results)
             else:
                 self._fail("Auto-paste needs permission to type the paste shortcut. "
-                           "The clipping was copied; paste it with Ctrl+V. "
+                           "The clipping was copied; paste it with Ctrl+V (Ctrl+Shift+V in terminals). "
                            "Turn Paste automatically off and on in Preferences to ask again."
                            if code == 1 else "The remote input portal could not start.")
 
@@ -441,18 +540,25 @@ class _PortalKeyboard:
             _PORTAL, "org.freedesktop.portal.Request", "Response", path, None,
             Gio.DBusSignalFlags.NONE, response, None,
         )
+        self._subscriptions.add(subscription)
 
         def called(bus, result, _data):
             try:
                 bus.call_finish(result)
             except GLib.Error as exc:
-                self._bus.signal_unsubscribe(subscription)
-                self._fail(f"The remote input portal is unavailable: {exc.message}")
+                self._unsubscribe(subscription)
+                if generation == self._generation:
+                    self._fail(f"The remote input portal is unavailable: {exc.message}")
 
         self._bus.call(
             _PORTAL, _PORTAL_PATH, _REMOTE_DESKTOP, method, parameters(token),
             None, Gio.DBusCallFlags.NONE, -1, None, called, None,
         )
+
+    def _unsubscribe(self, subscription: int) -> None:
+        if subscription in self._subscriptions:
+            self._subscriptions.discard(subscription)
+            self._bus.signal_unsubscribe(subscription)
 
     def _created(self, results) -> None:
         self._session = results["session_handle"]
@@ -496,9 +602,7 @@ class _PortalKeyboard:
             return None
 
     def _fail(self, message: str) -> None:
-        self.starting = False
-        self.ready = False
-        self._close_session()
+        self.close()
         self._on_error(message)
 
     def tap(self, keysyms: list[int]) -> bool:
@@ -526,19 +630,26 @@ class _PortalKeyboard:
             None, Gio.DBusCallFlags.NONE, 2000, None,
         )
 
+    def _close_handle(self, handle: str) -> None:
+        try:
+            self._bus.call_sync(
+                _PORTAL, handle, "org.freedesktop.portal.Session", "Close", None,
+                None, Gio.DBusCallFlags.NONE, 2000, None,
+            )
+        except GLib.Error:
+            pass
+
     def _close_session(self) -> None:
         if self._session:
-            try:
-                self._bus.call_sync(
-                    _PORTAL, self._session, "org.freedesktop.portal.Session", "Close", None,
-                    None, Gio.DBusCallFlags.NONE, 2000, None,
-                )
-            except GLib.Error:
-                pass
+            self._close_handle(self._session)
             self._session = None
 
     def close(self) -> None:
+        self._generation += 1
         self.ready = False
+        self.starting = False
+        for subscription in tuple(self._subscriptions):
+            self._unsubscribe(subscription)
         self._close_session()
 
 
@@ -564,6 +675,8 @@ class KdeWaylandBackend:
         self._windows = None
         self._keyboard = None
         self._mask = 0
+        self._qt_key = 0
+        self._reported_conflict = False
         for name in self.modifiers:
             self._mask |= int(_GDK_MODIFIER_MASKS[name]) if name in _GDK_MODIFIER_MASKS else 0
         label = "+".join(
@@ -571,12 +684,16 @@ class KdeWaylandBackend:
         )
         try:
             self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            self._shortcut = _GlobalShortcut(self._bus, qt_key_code(key_name, self.modifiers), label, self._pressed)
+            self._qt_key = qt_key_code(key_name, self.modifiers)
+            self._shortcut = _GlobalShortcut(self._bus, self._qt_key, label, self._pressed)
             self._windows = _ActiveWindows(self._bus)
             self._keyboard = _PortalKeyboard(self._bus, self._keyboard_error)
         except GLib.Error as exc:
             self.close()
             raise RuntimeError(f"KDE session services are unavailable: {exc.message}") from exc
+        except OSError as exc:
+            self.close()
+            raise RuntimeError(f"Cannot write the KWin helper script: {exc}") from exc
         except Exception:
             self.close()
             raise
@@ -632,6 +749,14 @@ class KdeWaylandBackend:
         state = int(Gdk.Keymap.get_for_display(display).get_modifier_state())
         return bool(state & self._mask)
 
+    def any_modifier_down(self) -> bool:
+        """Whether any modifier is held; KWin would add it to a typed paste."""
+        display = Gdk.Display.get_default()
+        if self._closed or display is None:
+            return False
+        state = int(Gdk.Keymap.get_for_display(display).get_modifier_state())
+        return bool(state & _ANY_MODIFIER_MASK)
+
     def restore_focus(self, window_id) -> bool:
         if self._closed or not window_id or not self._windows:
             return False
@@ -647,8 +772,17 @@ class KdeWaylandBackend:
         active = self._windows.active
         if active.get("id") != window_id or active.get("pid") == str(os.getpid()):
             return False
+        terminal = is_terminal_class(active.get("class"))
+        # KWin applies global shortcuts to portal input too, so typing our own
+        # shortcut would reopen Jumpkut instead of reaching the target.
+        if paste_chord(terminal) == self._qt_key:
+            if not self._reported_conflict:
+                self._reported_conflict = True
+                self._keyboard_error("Paste automatically is unavailable while the Jumpkut shortcut is the "
+                                     "paste shortcut itself. Choose another shortcut in Preferences.")
+            return False
         keys = [_KEYSYMS["Control_L"]]
-        if is_terminal_class(active.get("class")):
+        if terminal:
             keys.append(_KEYSYMS["Shift_L"])
         keys.append(_KEYSYMS["v"])
         return self._keyboard.tap(keys)

@@ -121,8 +121,8 @@ Release downloads include **SHA256SUMS**. Put it beside the downloaded packages 
 On Plasma 6 Wayland (for example Fedora KDE), Jumpkut runs its windows and tray icon through XWayland and uses KDE session services for the parts Wayland keeps private:
 
 - **Shortcut** — Alt+C is registered with KDE's global shortcut service. It also appears in **System Settings → Keyboard → Shortcuts → Jumpkut**; change it in Jumpkut's Preferences.
-- **Clipboard** — `wl-paste --watch` records copies from every app, and `wl-copy` sets the chosen clipping. Install it with `sudo dnf install wl-clipboard` if needed. Copies marked as passwords are skipped.
-- **Paste automatically** — KDE asks once for permission to type the paste shortcut (*Remote control requested*). Allow it and keep **Allow restoring on future sessions** checked. If you decline, Jumpkut still copies the clipping and you paste with Ctrl+V. To ask again, turn **Paste automatically** off and on in Preferences.
+- **Clipboard** — `wl-paste --watch` records copies from every app, and `wl-copy` sets the chosen clipping. It needs wl-clipboard 2.3 or newer (`sudo dnf install wl-clipboard`). Copies that carry the KDE password-manager hint (`x-kde-passwordManagerHint`, set by KeePassXC and similar apps) are skipped; other password copies are recorded like any text.
+- **Paste automatically** — KDE asks once for permission to type the paste shortcut (*Remote control requested*). Allow it and keep **Allow restoring on future sessions** checked. If you decline, Jumpkut still copies the clipping and you paste it yourself: Ctrl+V, or Ctrl+Shift+V (or your terminal's paste shortcut) in terminals such as Konsole and Ghostty. To ask again, turn **Paste automatically** off and on in Preferences.
 
 python-xlib is only needed for X11 sessions.
 

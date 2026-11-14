@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -45,7 +46,29 @@ def wayland_problem(environ=None) -> str | None:
     if missing:
         return ("Jumpkut needs wl-clipboard on Wayland (missing " + ", ".join(missing) + ").\n"
                 "On Fedora: sudo dnf install wl-clipboard")
+    version = wl_clipboard_version(environ)
+    if version is None or version < MIN_WL_CLIPBOARD:
+        found = ".".join(map(str, version)) if version else "an unknown version"
+        # Older wl-paste does not report password-manager copies as sensitive.
+        return (f"Jumpkut needs wl-clipboard {'.'.join(map(str, MIN_WL_CLIPBOARD))} or newer on Wayland "
+                f"(found {found}), so that password copies stay out of history.")
     return None
+
+
+MIN_WL_CLIPBOARD = (2, 3, 0)
+
+
+def wl_clipboard_version(environ=None) -> tuple[int, ...] | None:
+    environ = os.environ if environ is None else environ
+    try:
+        output = subprocess.run(
+            ["wl-paste", "--version"], capture_output=True, text=True, timeout=5,
+            env={**os.environ, **environ},
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"wl-clipboard (\d+)\.(\d+)(?:\.(\d+))?", output)
+    return tuple(int(part or 0) for part in match.groups()) if match else None
 
 
 def start_background():

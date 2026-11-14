@@ -51,7 +51,7 @@ def build(output_dir: Path) -> Path:
             f"License: MIT\nURL: {HOMEPAGE}\n"
             "Source0: payload.tar.gz\nBuildArch: noarch\n"
             "Requires: python3 >= 3.10\nRequires: python3-gobject\nRequires: gtk3\n"
-            "Requires: python3-xlib\nRequires: librsvg2\nRecommends: wl-clipboard\n"
+            "Requires: python3-xlib\nRequires: librsvg2\nRecommends: wl-clipboard >= 2.3.0\n"
             "\n%description\n"
             "Jumpkut keeps a local text clipboard archive, an Alt+C quick picker,\n"
             "a system tray menu, a searchable history window, and JSON backups.\n"

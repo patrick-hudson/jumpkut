@@ -42,6 +42,7 @@ class Jumpkut(Gtk.Application):
         self._previous_window = None
         self._release_source = 0
         self._paste_source = 0
+        self._accept_source = 0
         self._focus_deadline = 0.0
         self.kde_wayland = is_kde_wayland()
         self.wayland_clipboard = None
@@ -57,7 +58,7 @@ class Jumpkut(Gtk.Application):
         if self.kde_wayland:
             # XWayland only sees clipboard changes while it has focus.
             from .kde import WaylandClipboard
-            self.wayland_clipboard = WaylandClipboard(self._wayland_clipboard_changed)
+            self.wayland_clipboard = WaylandClipboard(self._wayland_clipboard_changed, self.notify)
         else:
             self.clipboard.connect("owner-change", self._owner_changed)
         self._bind_hotkey(self.config.settings.hotkey)
@@ -89,7 +90,7 @@ class Jumpkut(Gtk.Application):
         self.show_popup(held=False)
 
     def do_shutdown(self):
-        for attribute in ("_release_source", "_paste_source"):
+        for attribute in ("_release_source", "_paste_source", "_accept_source"):
             self._remove_source(attribute)
         if self.backend:
             self.backend.close()
@@ -262,16 +263,40 @@ class Jumpkut(Gtk.Application):
 
     def cancel_popup(self, restore=True):
         self._remove_source("_release_source")
+        self._remove_source("_accept_source")
         self.popup.hide()
         if restore and self.backend and self._previous_window:
             self.backend.restore_focus(self._previous_window)
 
     def accept_popup(self):
+        if self._paste_waits_for_modifiers():
+            # Enter or double-click while a modifier is held: KWin would merge
+            # it into the typed Ctrl+V, so accept once every modifier is up.
+            if not self._accept_source:
+                self._accept_source = GLib.timeout_add(25, self._accept_when_released)
+            return
         selected = self.popup.selected
         self.cancel_popup(restore=selected is None)
         if not selected:
             return
         self.select_clip(selected, self._previous_window)
+
+    def _paste_waits_for_modifiers(self):
+        backend = self.backend
+        return bool(
+            backend and backend.reads_modifiers_from_focus and self.config.settings.auto_paste
+            and self.popup.get_visible() and self.popup.is_active() and backend.any_modifier_down()
+        )
+
+    def _accept_when_released(self):
+        if not self.popup.get_visible():
+            self._accept_source = 0
+            return GLib.SOURCE_REMOVE
+        if self._paste_waits_for_modifiers():
+            return GLib.SOURCE_CONTINUE
+        self._accept_source = 0
+        self.accept_popup()
+        return GLib.SOURCE_REMOVE
 
     def select_clip(self, selected, target):
         self._last_selected_clip_id = selected.id
@@ -288,8 +313,12 @@ class Jumpkut(Gtk.Application):
             deadline = time.monotonic() + 1.5
 
             def paste_when_ready():
-                if self.wayland_clipboard and self.wayland_clipboard.pending_text is not None:
-                    pass  # wl-copy has not published the clipping yet.
+                publish = self.wayland_clipboard.publish_state if self.wayland_clipboard else "done"
+                if publish == "failed":
+                    self._paste_source = 0  # Never paste whatever was there before.
+                    return GLib.SOURCE_REMOVE
+                if publish == "pending":
+                    pass  # wl-copy has not been seen to own the clipboard yet.
                 elif self.backend.focused_window() != target:
                     # KWin returns focus asynchronously after the popup hides.
                     if not self.backend.focus_may_lag:
