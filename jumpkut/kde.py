@@ -177,12 +177,19 @@ class WaylandClipboard:
         self.on_change = on_change
         self.on_publish_failed = on_publish_failed or (lambda message: _LOG.error(message))
         self.last_state: tuple[str, str | None] | None = None
-        # "idle", "pending" (wl-copy has not been seen to own the clipboard),
-        # "done", or "failed". Paste only after "done".
+        # "idle", "pending" (the clipboard is not yet known to hold the
+        # wanted text), "done", or "failed". Paste only after "done".
         self.publish_state = "idle"
         self._wanted: str | None = None
         self._publish_generation = 0
-        self._publisher = None  # (process, text) of the one live wl-copy, if any.
+        # Every wl-copy that has not exited yet, with its text. A new one
+        # starts only when this is empty, so an older publisher can never
+        # take the clipboard after a newer one.
+        self._live: dict = {}
+        self._current = None  # The live publisher of the newest selection.
+        self._next: tuple[int, str] | None = None  # Waiting for _live to drain.
+        self._verifying = False
+        self._reverify = False
         # Our earlier texts, ignored while a newer publication is pending.
         # Stopping their publisher can make Plasma restore them, and that
         # echo is not a new copy by the user.
@@ -231,15 +238,53 @@ class WaylandClipboard:
             self.last_state = (state, text)
             if self.publish_state == "pending" and state == "data":
                 if text == self._wanted:
-                    # The clipboard holds the wanted text. Even if this event
-                    # predates our publisher, pasting now pastes that text, and
-                    # the publisher is stopped before any later selection.
-                    self.publish_state = "done"
-                    self._superseded.clear()
-                    self._clear_confirm_timer()
+                    # This event may have been queued before another copy
+                    # replaced the text, so confirm with a fresh read.
+                    self._verify()
                 elif text in self._superseded:
                     return
             self.on_change(state, text)
+
+    def _verify(self) -> None:
+        if self._verifying:
+            self._reverify = True  # Check again once the current read ends.
+            return
+        self._verifying = True
+        generation = self._publish_generation
+        self._read_current(lambda text: self._verified(generation, text))
+
+    def _verified(self, generation: int, text: str | None) -> None:
+        self._verifying = False
+        if (generation == self._publish_generation and self.publish_state == "pending"
+                and text is not None and text == self._wanted):
+            # The clipboard holds the wanted text now, so a paste pastes it.
+            self.publish_state = "done"
+            self._superseded.clear()
+            self._clear_confirm_timer()
+        elif self._reverify:
+            self._reverify = False
+            self._verify()
+
+    def _read_current(self, on_text: Callable[[str | None], None]) -> None:
+        """Read the clipboard's current text once (``None`` if unavailable)."""
+        try:
+            process = Gio.Subprocess.new(
+                ["wl-paste", "--no-newline", "--type", "text"],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
+            )
+        except GLib.Error:
+            on_text(None)
+            return
+
+        def done(proc, result, _data):
+            try:
+                _ok, stdout, _stderr = proc.communicate_finish(result)
+                text = stdout.get_data().decode("utf-8", errors="replace") if proc.get_successful() and stdout else None
+            except GLib.Error:
+                text = None
+            on_text(text)
+
+        process.communicate_async(None, None, done, None)
 
     def _restart(self) -> None:
         """Restart a watcher that exited, for example after a compositor restart."""
@@ -257,56 +302,66 @@ class WaylandClipboard:
     def set_text(self, text: str) -> None:
         """Publish ``text``; the newest call always wins the clipboard."""
         self._publish_generation += 1
-        generation = self._publish_generation
         self._wanted = text
         self.publish_state = "pending"
         self._clear_confirm_timer()
-        self._confirm_id = GLib.timeout_add(self.CONFIRM_TIMEOUT_MS, self._confirm_timeout, generation)
-        previous, self._publisher = self._publisher, None
-        if previous is not None:
-            # Watcher events cannot prove which process owns the clipboard,
-            # so never leave an older wl-copy running: it could still take the
-            # clipboard after this one. Start the new one once it has exited.
-            process, previous_text = previous
+        self._confirm_id = GLib.timeout_add(self.CONFIRM_TIMEOUT_MS, self._confirm_timeout, self._publish_generation)
+        # Watcher events cannot prove which process owns the clipboard, so
+        # stop every older wl-copy and start the new one after all have exited.
+        for process, previous_text in self._live.items():
             if previous_text != text:
                 self._superseded.add(previous_text)
             process.force_exit()
-            process.wait_async(None, lambda _process, _result, _data: self._spawn(generation, text), None)
-        else:
-            self._spawn(generation, text)
+        self._current = None
+        self._next = (self._publish_generation, text)
+        self._spawn_next()
 
-    def _spawn(self, generation: int, text: str) -> None:
-        if generation != self._publish_generation or self._closed:
+    def _spawn_next(self) -> None:
+        if self._live or self._next is None or self._closed:
+            return
+        (generation, text), self._next = self._next, None
+        if generation != self._publish_generation:
             return
         try:
-            # --foreground keeps the owning process ours, so it can be stopped.
-            process = Gio.Subprocess.new(
-                ["wl-copy", "--foreground", "--type", "text/plain;charset=utf-8"],
-                Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
-            )
+            process = self._launch_publisher(text, self._publisher_exited)
         except GLib.Error as exc:
             self._fail(generation, f"wl-copy could not start: {exc.message}")
             return
-        self._publisher = (process, text)
+        self._live[process] = text
+        self._current = process
+
+    def _launch_publisher(self, text: str, on_exit: Callable) -> object:
+        # --foreground keeps the owning process ours, so it can be stopped.
+        process = Gio.Subprocess.new(
+            ["wl-copy", "--foreground", "--type", "text/plain;charset=utf-8"],
+            Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
+        )
 
         def exited(proc, result, _data):
             try:
                 proc.communicate_finish(result)
-                reason = "wl-copy stopped before it owned the clipboard"
                 if proc.get_if_signaled():
                     reason = "wl-copy was stopped before it owned the clipboard"
                 elif not proc.get_successful():
                     reason = f"wl-copy failed with status {proc.get_exit_status()}"
+                else:
+                    reason = "wl-copy stopped before it owned the clipboard"
             except GLib.Error as exc:
                 reason = f"wl-copy failed: {exc.message}"
-            if self._publisher and self._publisher[0] is proc:
-                self._publisher = None
-            # Exiting is normal once another copy replaces ours; before the
-            # watcher confirmed ownership it means the clipping is not there.
-            if self.publish_state == "pending":
-                self._fail(generation, reason)
+            on_exit(proc, reason)
 
         process.communicate_async(GLib.Bytes.new(text.encode("utf-8")), None, exited, None)
+        return process
+
+    def _publisher_exited(self, process, reason: str) -> None:
+        self._live.pop(process, None)
+        if process is self._current:
+            self._current = None
+            # Exiting is normal once another copy replaces ours; before the
+            # clipboard was confirmed it means the clipping is not there.
+            if self.publish_state == "pending":
+                self._fail(self._publish_generation, reason)
+        self._spawn_next()
 
     def _confirm_timeout(self, generation: int) -> bool:
         self._confirm_id = 0
@@ -327,7 +382,9 @@ class WaylandClipboard:
         self.on_publish_failed(f"Could not copy the clipping: {reason}.")
 
     def close(self) -> None:
+        # Live publishers keep serving the clipboard after Jumpkut exits.
         self._closed = True
+        self._next = None
         self._clear_confirm_timer()
         if self._restart_id:
             GLib.source_remove(self._restart_id)

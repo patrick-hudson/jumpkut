@@ -271,7 +271,10 @@ class ClipboardPublicationTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.bin = Path(self.directory.name)
         self.log = self.bin / "copies.log"
-        self.write_tool("wl-paste", "exec sleep 30\n")
+        self.current = self.bin / "current-clipboard"
+        # --watch idles; a one-shot read prints the simulated clipboard.
+        self.write_tool("wl-paste", f'case " $* " in *" --watch "*) exec sleep 30 ;; esac\n'
+                                    f'cat {self.current} 2>/dev/null || exit 1\n')
         path = patch.dict(os.environ, {"PATH": f"{self.bin}:{os.environ['PATH']}"})
         path.start()
         self.addCleanup(path.stop)
@@ -295,10 +298,12 @@ class ClipboardPublicationTests(unittest.TestCase):
         self.assertTrue(run_loop_until(lambda: self.log.exists() and self.log.read_text() == "chosen"))
         clip._handle_line("data " + base64.b64encode(b"other").decode())
         self.assertEqual(clip.publish_state, "pending")
+        self.current.write_text("chosen")
         clip._handle_line("data " + base64.b64encode(b"chosen").decode())
+        self.assertTrue(run_loop_until(lambda: clip.publish_state != "pending"))
         self.assertEqual(clip.publish_state, "done")
         self.assertEqual(failures, [])
-        clip._publisher[0].force_exit()
+        clip._current.force_exit()
 
     def test_failed_wl_copy_is_not_success(self):
         self.write_tool("wl-copy", "cat >/dev/null; exit 3\n")
@@ -316,7 +321,7 @@ class ClipboardPublicationTests(unittest.TestCase):
         self.assertTrue(run_loop_until(lambda: clip.publish_state != "pending"))
         self.assertEqual(clip.publish_state, "failed")
         self.assertIn("in time", failures[0])
-        clip._publisher[0].force_exit()
+        clip._current.force_exit()
 
     def test_stale_confirmation_never_leaves_an_older_publisher_running(self):
         # A queued watcher event for the same text can confirm A before its
@@ -326,10 +331,11 @@ class ClipboardPublicationTests(unittest.TestCase):
         clip = kde.WaylandClipboard(lambda state, text: changes.append(text), lambda message: None)
         self.addCleanup(clip.close)
         clip.set_text("A")
-        clip._handle_line("data " + base64.b64encode(b"A").decode())  # Stale, from an earlier owner.
-        self.assertEqual(clip.publish_state, "done")
+        self.current.write_text("A")  # An earlier owner still holds the same text.
+        clip._handle_line("data " + base64.b64encode(b"A").decode())
+        self.assertTrue(run_loop_until(lambda: clip.publish_state == "done"))
         self.assertTrue(run_loop_until(lambda: self.log.exists() and "start A" in self.log.read_text()))
-        first = clip._publisher[0]
+        first = clip._current
         clip.set_text("B")
         self.assertTrue(run_loop_until(lambda: "start B" in self.log.read_text()))
         self.assertTrue(first.get_if_signaled())
@@ -338,25 +344,123 @@ class ClipboardPublicationTests(unittest.TestCase):
         clip._handle_line("data " + base64.b64encode(b"A").decode())
         clip._handle_line("data " + base64.b64encode(b"B").decode())
         self.assertEqual(changes, ["A", "B"])
-        self.assertEqual(clip.publish_state, "done")
+        self.current.write_text("B")
+        self.assertTrue(run_loop_until(lambda: clip.publish_state == "done"))
         # After confirmation, a real copy of A elsewhere is recorded again.
         clip._handle_line("data " + base64.b64encode(b"A").decode())
         self.assertEqual(changes, ["A", "B", "A"])
-        clip._publisher[0].force_exit()
+        clip._current.force_exit()
 
     def test_newer_selection_stops_an_unconfirmed_publisher_before_starting(self):
         self.write_tool("wl-copy", f"text=$(cat); echo \"start $text\" >> {self.log}; exec sleep 30\n")
         clip, failures = self.clipboard()
         clip.set_text("first")
         self.assertTrue(run_loop_until(lambda: self.log.exists() and "first" in self.log.read_text()))
-        first = clip._publisher[0]
+        first = clip._current
         clip.set_text("second")
         self.assertTrue(run_loop_until(lambda: "second" in self.log.read_text()))
         self.assertTrue(first.get_if_signaled())
         self.assertEqual(self.log.read_text().splitlines(), ["start first", "start second"])
         self.assertEqual(clip.publish_state, "pending")
         self.assertEqual(failures, [])
-        clip._publisher[0].force_exit()
+        clip._current.force_exit()
+
+
+class FakePublisher:
+    def __init__(self, text):
+        self.text = text
+        self.killed = False
+
+    def force_exit(self):
+        self.killed = True
+
+
+class PublicationOrderingTests(unittest.TestCase):
+    """Deterministic checks with fake publishers and clipboard reads."""
+
+    def make(self):
+        clip = kde.WaylandClipboard.__new__(kde.WaylandClipboard)
+        clip.on_change = lambda state, text: None
+        failures = []
+        clip.on_publish_failed = failures.append
+        clip.last_state = None
+        clip.publish_state = "idle"
+        clip._wanted = None
+        clip._publish_generation = 0
+        clip._live = {}
+        clip._current = None
+        clip._next = None
+        clip._verifying = False
+        clip._reverify = False
+        clip._superseded = set()
+        clip._confirm_id = 0
+        clip._closed = False
+        started = []
+
+        def launch(text, on_exit):
+            publisher = FakePublisher(text)
+            started.append(publisher)
+            return publisher
+
+        clip._launch_publisher = launch
+        self.addCleanup(clip._clear_confirm_timer)
+        return clip, started, failures
+
+    def test_three_quick_selections_wait_for_every_older_publisher(self):
+        clip, started, failures = self.make()
+        clip.set_text("A")
+        a = started[0]
+        clip.set_text("B")
+        clip.set_text("C")
+        # A is still exiting: neither B nor C may start yet.
+        self.assertTrue(a.killed)
+        self.assertEqual([p.text for p in started], ["A"])
+        clip._publisher_exited(a, "stopped")
+        self.assertEqual([p.text for p in started], ["A", "C"])  # B was superseded.
+        clip.set_text("D")
+        c = started[1]
+        self.assertTrue(c.killed)
+        self.assertEqual(len(started), 2)
+        clip._publisher_exited(c, "stopped")
+        self.assertEqual([p.text for p in started], ["A", "C", "D"])
+        self.assertEqual(failures, [])
+        self.assertEqual(clip.publish_state, "pending")
+
+    def test_stale_matching_event_needs_a_current_read(self):
+        clip, started, failures = self.make()
+        reads = []
+        clip._read_current = lambda on_text: reads.append(on_text)
+        clip.set_text("A")
+        event = "data " + base64.b64encode(b"A").decode()
+        clip._handle_line(event)  # Queued before someone copied X.
+        self.assertEqual(clip.publish_state, "pending")
+        reads.pop(0)("X")
+        self.assertEqual(clip.publish_state, "pending")  # Do not paste X.
+        clip._handle_line(event)  # Our publisher's own event.
+        reads.pop(0)("A")
+        self.assertEqual(clip.publish_state, "done")
+        self.assertEqual(failures, [])
+
+    def test_event_during_a_read_triggers_another_read(self):
+        clip, started, failures = self.make()
+        reads = []
+        clip._read_current = lambda on_text: reads.append(on_text)
+        clip.set_text("A")
+        event = "data " + base64.b64encode(b"A").decode()
+        clip._handle_line(event)
+        clip._handle_line(event)  # Arrives while the first read is running.
+        self.assertEqual(len(reads), 1)
+        reads.pop(0)("X")
+        self.assertEqual(len(reads), 1)  # Re-read rather than miss the newer event.
+        reads.pop(0)("A")
+        self.assertEqual(clip.publish_state, "done")
+
+    def test_current_publisher_exit_before_confirmation_fails(self):
+        clip, started, failures = self.make()
+        clip.set_text("A")
+        clip._publisher_exited(started[0], "wl-copy failed with status 1")
+        self.assertEqual(clip.publish_state, "failed")
+        self.assertIn("status 1", failures[0])
 
 
 class FakeBus:
