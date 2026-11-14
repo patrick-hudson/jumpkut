@@ -6,7 +6,7 @@ Jumpkut ships three installers from the [Linux packages workflow](https://github
 |---|---|---|
 | `jumpkut_VERSION_all.deb` | Debian `all` | System Python 3.10+, GTK 3, PyGObject, Xlib, SVG loader |
 | `jumpkut-VERSION-1.noarch.rpm` | RPM `noarch` | Fedora Python 3.10+, GTK 3, PyGObject, Xlib, librsvg |
-| `Jumpkut-VERSION-x86_64.AppImage` | x86_64 | Bundled Python and GTK; host glibc 2.35+ and X11 desktop |
+| `Jumpkut-VERSION-x86_64.AppImage` | x86_64 | Bundled Python and GTK; host glibc 2.35+; X11, or KDE Plasma Wayland with host wl-clipboard |
 
 ## Native package layout
 
@@ -39,4 +39,4 @@ Pushes, pull requests, and manual runs build packages and save them as a `linux-
 
 Only after the build succeeds does a separate job publish the installers and `SHA256SUMS` to the matching GitHub release. New releases start as drafts, become public after all assets upload, and use the version's changelog notes. Tagged reruns replace package assets on that release. Build jobs have read access; the publishing job alone has write access.
 
-Native Wayland is not supported. Native package architectures describe the Python payload; the AppImage currently targets x86_64 only.
+Wayland is supported on KDE Plasma 6, where the packages recommend `wl-clipboard` 2.3 or newer. Native package architectures describe the Python payload; the AppImage currently targets x86_64 only.

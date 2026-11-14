@@ -7,7 +7,7 @@
   <a href="https://github.com/patrick-hudson/jumpkut/actions/workflows/packages.yml"><img src="https://github.com/patrick-hudson/jumpkut/actions/workflows/packages.yml/badge.svg?branch=main" alt="Linux packages"></a>
   <a href="https://github.com/patrick-hudson/jumpkut/releases/latest"><img src="https://img.shields.io/github/v/release/patrick-hudson/jumpkut?color=7863cf" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7863cf" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/desktop-Linux%20%2F%20X11-7863cf" alt="Linux / X11">
+  <img src="https://img.shields.io/badge/desktop-X11%20%7C%20KDE%20Wayland-7863cf" alt="X11 or KDE Plasma Wayland">
   <img src="https://img.shields.io/badge/Python-3.10%2B-7863cf" alt="Python 3.10 or newer">
 </p>
 
@@ -26,7 +26,7 @@
 
 Jumpkut brings the quick, single-clipping picker of [Jumpcut](https://snark.github.io/jumpcut/) to Linux, with a scissors tray icon, a searchable history browser, and portable backups. It is a native GTK 3 app written in Python.
 
-**Requires an X11 desktop session.** Native Wayland is not supported. Jumpkut records text, including Unicode and multiline content; images and files are not recorded.
+**Runs on X11 desktops and on KDE Plasma 6 Wayland** ([details](#kde-plasma-wayland)). Other Wayland desktops are not supported yet. Jumpkut records text, including Unicode and multiline content; images and files are not recorded.
 
 ## How it works
 
@@ -69,7 +69,7 @@ These are real screenshots of Jumpkut **0.4.0**, using demo clippings.
 
 ## Installation
 
-Download an installer from **[the latest release](https://github.com/patrick-hudson/jumpkut/releases/latest)**. All formats require an **X11 session** and support the same clipboard history, preferences, and backups.
+Download an installer from **[the latest release](https://github.com/patrick-hudson/jumpkut/releases/latest)**. All formats run on an **X11 session** or **KDE Plasma Wayland**, and support the same clipboard history, preferences, and backups.
 
 | Format | Use it on | What is included |
 |---|---|---|
@@ -115,6 +115,16 @@ APPIMAGE_EXTRACT_AND_RUN=1 ./Jumpkut-*-x86_64.AppImage
 ```
 
 Release downloads include **SHA256SUMS**. Put it beside the downloaded packages and run `sha256sum --check --ignore-missing SHA256SUMS` to verify them. Source `.zip` and `.tar.gz` archives are also available on each release page.
+
+### KDE Plasma Wayland
+
+On Plasma 6 Wayland (for example Fedora KDE), Jumpkut runs its windows and tray icon through XWayland and uses KDE session services for the parts Wayland keeps private:
+
+- **Shortcut** — Alt+C is registered with KDE's global shortcut service. It also appears in **System Settings → Keyboard → Shortcuts → Jumpkut**; change it in Jumpkut's Preferences.
+- **Clipboard** — `wl-paste --watch` records copies from every app, and `wl-copy` sets the chosen clipping. It needs wl-clipboard 2.3 or newer (`sudo dnf install wl-clipboard`). Copies that carry the KDE password-manager hint (`x-kde-passwordManagerHint`, set by KeePassXC and similar apps) are skipped; other password copies are recorded like any text.
+- **Paste automatically** — KDE asks once for permission to type the paste shortcut (*Remote control requested*). Allow it and keep **Allow restoring on future sessions** checked. Afterwards KDE shows a short *exercising remote control privileges* notice once each time Jumpkut starts (usually once per sign-in); turning **Paste automatically** off avoids it. If you decline, Jumpkut still copies the clipping and you paste it yourself: Ctrl+V, or Ctrl+Shift+V (or your terminal's paste shortcut) in terminals such as Konsole and Ghostty. To ask again, turn **Paste automatically** off and on in Preferences.
+
+python-xlib is only needed for X11 sessions.
 
 ### Install from source
 

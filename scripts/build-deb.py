@@ -33,10 +33,11 @@ def build(output_dir: Path) -> Path:
             "Section: utils\nPriority: optional\n"
             f"Installed-Size: {installed_size}\nHomepage: {HOMEPAGE}\n"
             "Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, python3-xlib, librsvg2-common\n"
-            "Description: Keyboard-first clipboard manager for Linux/X11\n"
+            "Recommends: wl-clipboard (>= 2.3.0)\n"
+            "Description: Keyboard-first clipboard manager for Linux\n"
             " Jumpkut keeps a local text clipboard archive, an Alt+C quick picker,\n"
             " a system tray menu, a searchable history window, and JSON backups.\n"
-            " It requires an X11 session; native Wayland sessions are not supported.\n",
+            " It runs on X11 sessions and on KDE Plasma Wayland (with wl-clipboard).\n",
             encoding="utf-8")
         (control / "md5sums").write_text(
             "".join(f"{hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()}  {path.relative_to(staging).as_posix()}\n"

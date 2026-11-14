@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
+### Added
+
+- Support KDE Plasma 6 Wayland sessions. Alt+C is registered with KDE's global shortcuts and appears in System Settings. Clipboard copies from every app are recorded through wl-clipboard 2.3 or newer; copies that carry the KDE password-manager hint (`x-kde-passwordManagerHint`) are skipped. Paste automatically uses the RemoteDesktop portal after a one-time permission prompt; Jumpkut opens one input session per run and keeps it across shortcut changes, so KDE's remote-control notice appears once per sign-in. It waits until held modifiers are released, and types Ctrl+Shift+V for terminals including Konsole and Ghostty. The tray icon and popup run through XWayland; python-xlib is now needed only on X11.
+
 ## [0.6.1] - 2026-10-16
 
 ### Fixed

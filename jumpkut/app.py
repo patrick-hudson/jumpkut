@@ -9,12 +9,11 @@ from pathlib import Path
 from gi.repository import Gdk, Gio, GLib, Gtk
 
 from . import __version__
-from .__main__ import parser
+from .__main__ import is_kde_wayland, parser
 from .history import History
 from .history_window import FullHistory
 from .settings import Config, Settings, autostart_enabled, data_path, set_autostart
 from .ui import Popup, Preferences, choose_backup
-from .x11 import X11Backend
 
 
 def parse_hotkey(shortcut):
@@ -43,6 +42,10 @@ class Jumpkut(Gtk.Application):
         self._previous_window = None
         self._release_source = 0
         self._paste_source = 0
+        self._accept_source = 0
+        self._focus_deadline = 0.0
+        self.kde_wayland = is_kde_wayland()
+        self.wayland_clipboard = None
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -52,7 +55,12 @@ class Jumpkut(Gtk.Application):
         self.history = History(data_path() if self.config.settings.persist else None,
                                background=True, on_save_error=self._history_save_error)
         self.clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-        self.clipboard.connect("owner-change", self._owner_changed)
+        if self.kde_wayland:
+            # XWayland only sees clipboard changes while it has focus.
+            from .kde import WaylandClipboard
+            self.wayland_clipboard = WaylandClipboard(self._wayland_clipboard_changed, self.notify)
+        else:
+            self.clipboard.connect("owner-change", self._owner_changed)
         self._bind_hotkey(self.config.settings.hotkey)
         self.popup = Popup(self)
         self._make_tray()
@@ -61,7 +69,8 @@ class Jumpkut(Gtk.Application):
                 self.notify(problem)
         for signum in (signal.SIGTERM, signal.SIGINT):
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signum, self._quit_signal)
-        GLib.idle_add(self._capture_current)
+        if not self.kde_wayland:
+            GLib.idle_add(self._capture_current)
 
     def do_command_line(self, command_line):
         options = parser().parse_args(command_line.get_arguments()[1:])
@@ -81,10 +90,12 @@ class Jumpkut(Gtk.Application):
         self.show_popup(held=False)
 
     def do_shutdown(self):
-        for attribute in ("_release_source", "_paste_source"):
+        for attribute in ("_release_source", "_paste_source", "_accept_source"):
             self._remove_source(attribute)
         if self.backend:
             self.backend.close()
+        if self.wayland_clipboard:
+            self.wayland_clipboard.close()
         if self.tray:
             self.tray.set_visible(False)
         try:
@@ -113,10 +124,20 @@ class Jumpkut(Gtk.Application):
             self.hotkey_key, name, modifiers = parse_hotkey(shortcut)
             self.notify("Invalid saved keyboard shortcut. Using Alt+C; the original preferences file is preserved until you save Preferences.")
         try:
-            self.backend = X11Backend(name, modifiers, self._hotkey)
+            self.backend = self._new_backend(name, modifiers)
         except RuntimeError as exc:
             self.backend = None
             self.notify(f"Keyboard shortcut unavailable: {exc}. Open history from the tray or change the shortcut in Preferences.")
+
+    def _new_backend(self, name, modifiers):
+        if self.kde_wayland:
+            from .kde import KdeWaylandBackend
+            backend = KdeWaylandBackend(name, modifiers, self._hotkey, on_error=self.notify)
+        else:
+            from .x11 import X11Backend
+            backend = X11Backend(name, modifiers, self._hotkey)
+        backend.prepare_paste(self.config.settings.auto_paste)
+        return backend
 
     def _hotkey(self):
         if self.preferences and self.preferences.recording_shortcut:
@@ -127,8 +148,20 @@ class Jumpkut(Gtk.Application):
             self.show_popup(held=True)
 
     def _capture_current(self):
-        self._owner_changed(self.clipboard, None)
+        if self.wayland_clipboard:
+            self.wayland_clipboard.replay()
+        else:
+            self._owner_changed(self.clipboard, None)
         return GLib.SOURCE_REMOVE
+
+    def _wayland_clipboard_changed(self, state, text):
+        self._generation += 1
+        if self.paused:
+            return
+        if state == "sensitive":
+            self._ignore_text = None
+        elif state == "data":
+            self._record_text(text)
 
     def _owner_changed(self, clipboard, _event):
         self._generation += 1
@@ -148,19 +181,22 @@ class Jumpkut(Gtk.Application):
         def text_received(_clipboard, text, _data):
             if generation != self._generation or self.paused:
                 return
-            ignored = self._ignore_text
-            self._ignore_text = None
-            if text is None or text == ignored:
-                return
-            if text.strip():
-                self._last_selected_clip_id = None
-            try:
-                self.history.add(text)
-            except OSError as exc:
-                self.notify(f"History is available in memory, but could not be saved: {exc}")
-            self._history_changed()
+            self._record_text(text)
 
         clipboard.request_targets(targets_received, None)
+
+    def _record_text(self, text):
+        ignored = self._ignore_text
+        self._ignore_text = None
+        if text is None or text == ignored:
+            return
+        if text.strip():
+            self._last_selected_clip_id = None
+        try:
+            self.history.add(text)
+        except OSError as exc:
+            self.notify(f"History is available in memory, but could not be saved: {exc}")
+        self._history_changed()
 
     def show_popup(self, held=False):
         self._remove_source("_paste_source")
@@ -172,6 +208,7 @@ class Jumpkut(Gtk.Application):
         timestamp = self.backend.last_event_time if held and self.backend else Gtk.get_current_event_time()
         selected_id = self._last_selected_clip_id if self.config.settings.resume_last_selection else None
         self.popup.open(self.recent_clips(), release_selects, timestamp, selected_id)
+        self._focus_deadline = time.monotonic() + 1.5
         if release_selects:
             self._release_source = GLib.timeout_add(25, self._check_release)
 
@@ -204,6 +241,14 @@ class Jumpkut(Gtk.Application):
         if not self.popup.get_visible():
             self._release_source = 0
             return GLib.SOURCE_REMOVE
+        if self.backend.reads_modifiers_from_focus and not self.popup.is_active():
+            # XWayland learns the modifier state only once the popup is focused.
+            if time.monotonic() < self._focus_deadline:
+                return GLib.SOURCE_CONTINUE
+            self._release_source = 0
+            self.cancel_popup()
+            self.notify("The history popup did not receive keyboard focus. Try the shortcut again.")
+            return GLib.SOURCE_REMOVE
         if not self.backend.modifiers_down():
             self._release_source = 0
             self.accept_popup()
@@ -218,38 +263,81 @@ class Jumpkut(Gtk.Application):
 
     def cancel_popup(self, restore=True):
         self._remove_source("_release_source")
+        self._remove_source("_accept_source")
         self.popup.hide()
         if restore and self.backend and self._previous_window:
             self.backend.restore_focus(self._previous_window)
 
     def accept_popup(self):
+        if self._paste_waits_for_modifiers():
+            # Enter or double-click while a modifier is held: KWin would merge
+            # it into the typed Ctrl+V, so accept once every modifier is up.
+            if not self._accept_source:
+                self._accept_source = GLib.timeout_add(25, self._accept_when_released)
+            return
         selected = self.popup.selected
         self.cancel_popup(restore=selected is None)
         if not selected:
             return
         self.select_clip(selected, self._previous_window)
 
+    def _paste_waits_for_modifiers(self):
+        backend = self.backend
+        return bool(
+            backend and backend.reads_modifiers_from_focus and self.config.settings.auto_paste
+            and self.popup.get_visible() and self.popup.is_active() and backend.any_modifier_down()
+        )
+
+    def _accept_when_released(self):
+        if not self.popup.get_visible():
+            self._accept_source = 0
+            return GLib.SOURCE_REMOVE
+        if self._paste_waits_for_modifiers():
+            return GLib.SOURCE_CONTINUE
+        self._accept_source = 0
+        self.accept_popup()
+        return GLib.SOURCE_REMOVE
+
     def select_clip(self, selected, target):
         self._last_selected_clip_id = selected.id
         self._ignore_text = selected.text
-        self.clipboard.set_text(selected.text, -1)
+        if self.wayland_clipboard:
+            self.wayland_clipboard.set_text(selected.text)
+        else:
+            self.clipboard.set_text(selected.text, -1)
         self._remove_source("_paste_source")
         if self.backend and target:
             self.backend.restore_focus(target)
-        own_window = any(window.get_window() and window.get_window().get_xid() == target for window in self.get_windows())
+        own_window = self._is_own_window(target)
         if self.config.settings.auto_paste and self.backend and self.backend.has_paste and target and not own_window:
             deadline = time.monotonic() + 1.5
 
             def paste_when_ready():
-                if self.backend.focused_window() != target:
+                publish = self.wayland_clipboard.publish_state if self.wayland_clipboard else "done"
+                if publish == "failed":
+                    self._paste_source = 0  # Never paste whatever was there before.
+                    return GLib.SOURCE_REMOVE
+                if publish == "pending":
+                    pass  # wl-copy has not been seen to own the clipboard yet.
+                elif self.backend.focused_window() != target:
+                    # KWin returns focus asynchronously after the popup hides.
+                    if not self.backend.focus_may_lag:
+                        self._paste_source = 0
+                        return GLib.SOURCE_REMOVE
+                elif self.backend.paste(target):
                     self._paste_source = 0
                     return GLib.SOURCE_REMOVE
-                if self.backend.paste(target) or time.monotonic() >= deadline:
+                if time.monotonic() >= deadline:
                     self._paste_source = 0
                     return GLib.SOURCE_REMOVE
                 return GLib.SOURCE_CONTINUE
 
             self._paste_source = GLib.timeout_add(100, paste_when_ready)
+
+    def _is_own_window(self, target):
+        if self.kde_wayland:
+            return bool(self.backend and self.backend.is_own_window(target))
+        return any(window.get_window() and window.get_window().get_xid() == target for window in self.get_windows())
 
     def remove_clip(self, clip_id):
         try:
@@ -346,7 +434,7 @@ class Jumpkut(Gtk.Application):
                 self.backend.close()
             self.backend = None
             try:
-                self.backend = X11Backend(name, modifiers, self._hotkey)
+                self.backend = self._new_backend(name, modifiers)
             except RuntimeError:
                 self._bind_hotkey(old.hotkey)
                 raise
@@ -358,6 +446,8 @@ class Jumpkut(Gtk.Application):
                 self._bind_hotkey(old.hotkey)
             raise
         self.hotkey_key = key
+        if self.backend:
+            self.backend.prepare_paste(settings.auto_paste)
         errors = []
         try:
             set_autostart(startup)
