@@ -182,8 +182,11 @@ class WaylandClipboard:
         self.publish_state = "idle"
         self._wanted: str | None = None
         self._publish_generation = 0
-        self._confirmed_generation = 0
-        self._publisher = None  # (process, generation) of the newest live wl-copy.
+        self._publisher = None  # (process, text) of the one live wl-copy, if any.
+        # Our earlier texts, ignored while a newer publication is pending.
+        # Stopping their publisher can make Plasma restore them, and that
+        # echo is not a new copy by the user.
+        self._superseded: set[str] = set()
         self._confirm_id = 0
         self._process = None
         self._stream = None
@@ -226,10 +229,16 @@ class WaylandClipboard:
         state, text = parse_watch_line(line)
         if state != "invalid":
             self.last_state = (state, text)
-            if self.publish_state == "pending" and state == "data" and text == self._wanted:
-                self.publish_state = "done"
-                self._confirmed_generation = self._publish_generation
-                self._clear_confirm_timer()
+            if self.publish_state == "pending" and state == "data":
+                if text == self._wanted:
+                    # The clipboard holds the wanted text. Even if this event
+                    # predates our publisher, pasting now pastes that text, and
+                    # the publisher is stopped before any later selection.
+                    self.publish_state = "done"
+                    self._superseded.clear()
+                    self._clear_confirm_timer()
+                elif text in self._superseded:
+                    return
             self.on_change(state, text)
 
     def _restart(self) -> None:
@@ -254,15 +263,16 @@ class WaylandClipboard:
         self._clear_confirm_timer()
         self._confirm_id = GLib.timeout_add(self.CONFIRM_TIMEOUT_MS, self._confirm_timeout, generation)
         previous, self._publisher = self._publisher, None
-        if previous is not None and previous[1] > self._confirmed_generation:
-            # An unconfirmed wl-copy could still take the clipboard after this
-            # one. Stop it, and start the new publisher only once it is gone.
-            process = previous[0]
+        if previous is not None:
+            # Watcher events cannot prove which process owns the clipboard,
+            # so never leave an older wl-copy running: it could still take the
+            # clipboard after this one. Start the new one once it has exited.
+            process, previous_text = previous
+            if previous_text != text:
+                self._superseded.add(previous_text)
             process.force_exit()
             process.wait_async(None, lambda _process, _result, _data: self._spawn(generation, text), None)
         else:
-            # A confirmed publisher already owns the clipboard and exits by
-            # itself when the new one replaces it.
             self._spawn(generation, text)
 
     def _spawn(self, generation: int, text: str) -> None:
@@ -277,13 +287,15 @@ class WaylandClipboard:
         except GLib.Error as exc:
             self._fail(generation, f"wl-copy could not start: {exc.message}")
             return
-        self._publisher = (process, generation)
+        self._publisher = (process, text)
 
         def exited(proc, result, _data):
             try:
                 proc.communicate_finish(result)
                 reason = "wl-copy stopped before it owned the clipboard"
-                if not proc.get_successful():
+                if proc.get_if_signaled():
+                    reason = "wl-copy was stopped before it owned the clipboard"
+                elif not proc.get_successful():
                     reason = f"wl-copy failed with status {proc.get_exit_status()}"
             except GLib.Error as exc:
                 reason = f"wl-copy failed: {exc.message}"
@@ -310,6 +322,7 @@ class WaylandClipboard:
         if generation != self._publish_generation or self.publish_state != "pending":
             return
         self.publish_state = "failed"
+        self._superseded.clear()
         self._clear_confirm_timer()
         self.on_publish_failed(f"Could not copy the clipping: {reason}.")
 

@@ -318,6 +318,32 @@ class ClipboardPublicationTests(unittest.TestCase):
         self.assertIn("in time", failures[0])
         clip._publisher[0].force_exit()
 
+    def test_stale_confirmation_never_leaves_an_older_publisher_running(self):
+        # A queued watcher event for the same text can confirm A before its
+        # wl-copy owns the clipboard; B must still wait for A to be gone.
+        self.write_tool("wl-copy", f"text=$(cat); echo \"start $text\" >> {self.log}; exec sleep 30\n")
+        changes = []
+        clip = kde.WaylandClipboard(lambda state, text: changes.append(text), lambda message: None)
+        self.addCleanup(clip.close)
+        clip.set_text("A")
+        clip._handle_line("data " + base64.b64encode(b"A").decode())  # Stale, from an earlier owner.
+        self.assertEqual(clip.publish_state, "done")
+        self.assertTrue(run_loop_until(lambda: self.log.exists() and "start A" in self.log.read_text()))
+        first = clip._publisher[0]
+        clip.set_text("B")
+        self.assertTrue(run_loop_until(lambda: "start B" in self.log.read_text()))
+        self.assertTrue(first.get_if_signaled())
+        self.assertEqual(self.log.read_text().splitlines(), ["start A", "start B"])
+        # Plasma may restore A when its owner stops: that echo is not a new copy.
+        clip._handle_line("data " + base64.b64encode(b"A").decode())
+        clip._handle_line("data " + base64.b64encode(b"B").decode())
+        self.assertEqual(changes, ["A", "B"])
+        self.assertEqual(clip.publish_state, "done")
+        # After confirmation, a real copy of A elsewhere is recorded again.
+        clip._handle_line("data " + base64.b64encode(b"A").decode())
+        self.assertEqual(changes, ["A", "B", "A"])
+        clip._publisher[0].force_exit()
+
     def test_newer_selection_stops_an_unconfirmed_publisher_before_starting(self):
         self.write_tool("wl-copy", f"text=$(cat); echo \"start $text\" >> {self.log}; exec sleep 30\n")
         clip, failures = self.clipboard()
