@@ -391,7 +391,7 @@ class PublicationOrderingTests(unittest.TestCase):
         clip._current = None
         clip._next = None
         clip._verifying = False
-        clip._reverify = False
+        clip._events = 0
         clip._superseded = set()
         clip._confirm_id = 0
         clip._closed = False
@@ -452,6 +452,22 @@ class PublicationOrderingTests(unittest.TestCase):
         self.assertEqual(len(reads), 1)
         reads.pop(0)("X")
         self.assertEqual(len(reads), 1)  # Re-read rather than miss the newer event.
+        reads.pop(0)("A")
+        self.assertEqual(clip.publish_state, "done")
+
+    def test_change_during_a_read_invalidates_its_result(self):
+        clip, started, failures = self.make()
+        reads = []
+        clip._read_current = lambda on_text: reads.append(on_text)
+        clip.set_text("A")
+        clip._handle_line("data " + base64.b64encode(b"A").decode())  # Stale A event.
+        clip._handle_line("data " + base64.b64encode(b"X").decode())  # X lands mid-read.
+        reads.pop(0)("A")  # The read saw A before X replaced it.
+        self.assertEqual(clip.publish_state, "pending")
+        self.assertEqual(len(reads), 1)  # Read again instead.
+        reads.pop(0)("X")
+        self.assertEqual(clip.publish_state, "pending")
+        clip._handle_line("data " + base64.b64encode(b"A").decode())  # Our publisher's event.
         reads.pop(0)("A")
         self.assertEqual(clip.publish_state, "done")
 

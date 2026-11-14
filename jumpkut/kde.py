@@ -189,7 +189,7 @@ class WaylandClipboard:
         self._current = None  # The live publisher of the newest selection.
         self._next: tuple[int, str] | None = None  # Waiting for _live to drain.
         self._verifying = False
-        self._reverify = False
+        self._events = 0  # Watcher events seen; a read is valid only if none arrive during it.
         # Our earlier texts, ignored while a newer publication is pending.
         # Stopping their publisher can make Plasma restore them, and that
         # echo is not a new copy by the user.
@@ -235,6 +235,7 @@ class WaylandClipboard:
     def _handle_line(self, line: str) -> None:
         state, text = parse_watch_line(line)
         if state != "invalid":
+            self._events += 1
             self.last_state = (state, text)
             if self.publish_state == "pending" and state == "data":
                 if text == self._wanted:
@@ -247,23 +248,24 @@ class WaylandClipboard:
 
     def _verify(self) -> None:
         if self._verifying:
-            self._reverify = True  # Check again once the current read ends.
-            return
+            return  # The running read is re-checked when it ends.
         self._verifying = True
-        generation = self._publish_generation
-        self._read_current(lambda text: self._verified(generation, text))
+        generation, events = self._publish_generation, self._events
+        self._read_current(lambda text: self._verified(generation, events, text))
 
-    def _verified(self, generation: int, text: str | None) -> None:
+    def _verified(self, generation: int, events: int, text: str | None) -> None:
         self._verifying = False
-        if (generation == self._publish_generation and self.publish_state == "pending"
-                and text is not None and text == self._wanted):
+        if self.publish_state != "pending":
+            return
+        if events != self._events:
+            # The clipboard changed while reading, so the result may be
+            # stale: read again instead of authorizing a paste.
+            self._verify()
+        elif generation == self._publish_generation and text is not None and text == self._wanted:
             # The clipboard holds the wanted text now, so a paste pastes it.
             self.publish_state = "done"
             self._superseded.clear()
             self._clear_confirm_timer()
-        elif self._reverify:
-            self._reverify = False
-            self._verify()
 
     def _read_current(self, on_text: Callable[[str | None], None]) -> None:
         """Read the clipboard's current text once (``None`` if unavailable)."""
