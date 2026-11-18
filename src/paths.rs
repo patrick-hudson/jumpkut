@@ -88,9 +88,9 @@ fn choose_runtime_dir(
     fallback: &std::path::Path,
     name: &str,
 ) -> Option<PathBuf> {
-    // Only a parent no one else can write to keeps the child from being
-    // replaced after it is checked.
-    if let Some(base) = base.filter(|b| owned_not_shared(b)) {
+    // Only a path no one else can rename or replace keeps the directory
+    // from being swapped after it is checked.
+    if let Some(base) = base.filter(|b| trusted_path(b)) {
         let dir = base.join(name);
         match ensure_private_dir(&dir) {
             Ok(()) => return Some(dir),
@@ -98,6 +98,13 @@ fn choose_runtime_dir(
         }
     }
     let dir = fallback.join(name);
+    if !fallback.parent().is_some_and(trusted_path) {
+        eprintln!(
+            "Jumpkut: {} is in a directory others can change.",
+            fallback.display()
+        );
+        return None;
+    }
     match ensure_private_dir(fallback).and_then(|()| ensure_private_dir(&dir)) {
         Ok(()) => Some(dir),
         Err(e) => {
@@ -107,12 +114,36 @@ fn choose_runtime_dir(
     }
 }
 
-/// `dir` is a directory owned by us that group and others cannot write to.
-fn owned_not_shared(dir: &std::path::Path) -> bool {
+/// `dir` and every directory above it belong to us or root, and none can be
+/// changed by others: not group/other-writable, unless sticky (like /tmp,
+/// where others cannot rename our entries). `dir` itself must not be shared.
+/// A missing `dir` (created later) is judged by its nearest existing parent.
+fn trusted_path(dir: &std::path::Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     // SAFETY: geteuid has no preconditions.
     let uid = unsafe { libc::geteuid() };
-    std::fs::metadata(dir).is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o022 == 0)
+    let Ok(absolute) = std::path::absolute(dir) else {
+        return false;
+    };
+    let mut first = true;
+    for path in absolute.ancestors() {
+        let Ok(meta) = std::fs::metadata(path) else {
+            if first {
+                continue; // not created yet
+            }
+            return false;
+        };
+        let shared = meta.mode() & 0o022 != 0;
+        let sticky = meta.mode() & 0o1000 != 0;
+        if !meta.is_dir()
+            || (meta.uid() != uid && meta.uid() != 0)
+            || (shared && (first || !sticky))
+        {
+            return false;
+        }
+        first = false;
+    }
+    true
 }
 
 /// Create `dir` with mode 0700, or accept an existing one only if it is a
@@ -162,6 +193,11 @@ mod runtime_tests {
             choose_runtime_dir(Some(&shared), &fallback, "jumpkut-2"),
             None
         );
+        // A fallback inside a directory others can write to is refused too:
+        // they could rename `run` and put their own in its place.
+        let exposed = shared.join("state/run");
+        assert_eq!(choose_runtime_dir(None, &exposed, "jumpkut-3"), None);
+        assert!(!exposed.exists());
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
