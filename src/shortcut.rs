@@ -44,6 +44,7 @@ const NAMED: &[(&str, u32, u32, char, &str)] = &[
 
 /// GDK names of punctuation keys and their characters.
 const PUNCTUATION: &[(&str, char)] = &[
+    ("plus", '+'),
     ("comma", ','),
     ("period", '.'),
     ("slash", '/'),
@@ -55,6 +56,26 @@ const PUNCTUATION: &[(&str, char)] = &[
     ("minus", '-'),
     ("equal", '='),
     ("grave", '`'),
+    ("exclam", '!'),
+    ("quotedbl", '"'),
+    ("numbersign", '#'),
+    ("dollar", '$'),
+    ("percent", '%'),
+    ("ampersand", '&'),
+    ("parenleft", '('),
+    ("parenright", ')'),
+    ("asterisk", '*'),
+    ("colon", ':'),
+    ("less", '<'),
+    ("greater", '>'),
+    ("question", '?'),
+    ("at", '@'),
+    ("asciicircum", '^'),
+    ("underscore", '_'),
+    ("braceleft", '{'),
+    ("bar", '|'),
+    ("braceright", '}'),
+    ("asciitilde", '~'),
 ];
 
 fn function_key(key: &str) -> Option<u32> {
@@ -106,7 +127,10 @@ pub fn parse(text: &str) -> Result<Shortcut, String> {
         names.push(name.to_owned());
         rest = tail;
     }
-    let mut parts: Vec<&str> = if rest.len() > 1 && rest.contains('+') {
+    let mut parts: Vec<&str> = if let Some(mods) = rest.strip_suffix("++") {
+        // `Alt++`: the key is the plus sign itself.
+        mods.split('+').chain(["+"]).collect()
+    } else if rest.len() > 1 && rest.contains('+') {
         rest.split('+').collect()
     } else {
         vec![rest]
@@ -149,19 +173,22 @@ impl Shortcut {
         out + &self.key
     }
 
-    pub fn label(&self) -> String {
+    fn modifier_names(&self) -> Vec<String> {
         let m = self.modifiers;
-        let mut parts: Vec<String> = Vec::new();
-        for (on, name) in [
+        [
             (m.shift, "Shift"),
             (m.control, "Ctrl"),
             (m.alt, "Alt"),
             (m.super_, "Super"),
-        ] {
-            if on {
-                parts.push(name.into());
-            }
-        }
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, name)| name.to_owned())
+        .collect()
+    }
+
+    pub fn label(&self) -> String {
+        let mut parts = self.modifier_names();
         let key = if let Some((.., label)) = NAMED.iter().find(|(n, ..)| *n == self.key) {
             (*label).to_owned()
         } else if let Some(c) = key_char(&self.key) {
@@ -174,10 +201,7 @@ impl Shortcut {
     }
 
     pub fn modifier_label(&self) -> String {
-        let label = self.label();
-        label
-            .rsplit_once('+')
-            .map_or(label.clone(), |(mods, _)| mods.to_owned())
+        self.modifier_names().join("+")
     }
 
     /// Qt key combination for KGlobalAccel (same codes the Python app used).
@@ -205,8 +229,9 @@ impl Shortcut {
         if let Some((_, _, sym, ..)) = NAMED.iter().find(|(n, ..)| *n == self.key) {
             return *sym;
         }
-        let c = key_char(&self.key).unwrap_or(' ') as u32;
-        if c < 0x100 { c } else { 0x0100_0000 + c }
+        // The legacy keysym when X11 has one (`Cyrillic_es`), else the
+        // Unicode keysym, as xkb_utf32_to_keysym does.
+        xkeysym::Keysym::from_char(key_char(&self.key).unwrap_or(' ')).raw()
     }
 
     /// The text Slint reports for the key (lowercase), for in-popup cycling.
@@ -242,5 +267,27 @@ impl Shortcut {
             canonical_key(&c.to_lowercase().collect::<String>())?
         };
         Some(Shortcut { modifiers, key })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gtk_names_and_legacy_keysyms() {
+        let alt_c = parse("<Alt>c").unwrap();
+        assert_eq!((alt_c.accel(), alt_c.keysym()), ("<Alt>c".into(), 0x63));
+        for text in ["<Primary>plus", "Ctrl++", "<Primary>+"] {
+            let s = parse(text).unwrap();
+            assert_eq!((s.accel(), s.keysym()), ("<Primary>plus".into(), 0x2b));
+        }
+        let ctrl = Modifiers {
+            control: true,
+            ..Modifiers::default()
+        };
+        assert_eq!(Shortcut::from_slint("+", ctrl).unwrap().key, "plus");
+        // Cyrillic_es, not the Unicode keysym 0x01000441.
+        assert_eq!(parse("<Alt>с").unwrap().keysym(), 0x06d3);
     }
 }

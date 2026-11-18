@@ -306,6 +306,7 @@ export component HistoryWindow inherits Window {
 }
 
 export component PreferencesWindow inherits Window {
+    forward-focus: keys;
     title: "Jumpkut Preferences";
     icon: @image-url("../assets/jumpkut.svg");
     width: 480px;
@@ -497,6 +498,7 @@ export component PreferencesWindow inherits Window {
 }
 
 export component AboutWindow inherits Window {
+    forward-focus: keys;
     title: "About Jumpkut";
     icon: @image-url("../assets/jumpkut.svg");
     width: 420px;
@@ -506,7 +508,7 @@ export component AboutWindow inherits Window {
     in property <string> version;
     callback close-window();
 
-    FocusScope {
+    keys := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape || event.text == Key.Return) {
                 root.close-window();
@@ -571,6 +573,7 @@ export component AboutWindow inherits Window {
 }
 
 export component MessageWindow inherits Window {
+    forward-focus: keys;
     title: "Jumpkut";
     icon: @image-url("../assets/jumpkut.svg");
     width: 420px;
@@ -584,7 +587,7 @@ export component MessageWindow inherits Window {
     in property <string> ok-text: "Close";
     callback answered(bool);
 
-    FocusScope {
+    keys := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 root.answered(false);

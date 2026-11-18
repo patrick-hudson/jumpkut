@@ -1,7 +1,7 @@
 [package]
 name = "jumpkut"
 # The application version (single source of truth; scripts/release.py bumps it).
-version = "0.8.1"
+version = "0.8.2"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -33,6 +33,8 @@ serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
 libc = "=0.2.191"
 ksni = { version = "=0.3.7", default-features = false, features = ["async-io", "blocking"] }
 xkbcommon-dl = "=0.4.2"
+# Already built for winit/xkbcommon-dl; maps characters to legacy X11 keysyms.
+xkeysym = "=0.2.1"
 # Already used by Slint for SVG; rasterises the tray icon.
 resvg = { version = "=0.48.1", default-features = false }
 # Not used directly: turns on runtime loading of libfontconfig (used by

@@ -62,14 +62,14 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(self.backup.read_text(), '{"saved": "backup"}\n')
 
         desktop = (self.prefix / "share/applications/jumpkut.desktop").read_text()
-        self.assertIn(f"Exec={installer.quote_exec_argument(str(launcher))} --history\n", desktop)
+        self.assertIn(f"Exec={installer.exec_command(launcher)} --history\n", desktop)
         self.assertIn("StartupWMClass=jumpkut\n", desktop)
         self.assertIn("X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input\n", desktop)
         icon = self.prefix / "share/icons/hicolor/scalable/apps/jumpkut.svg"
         self.assertEqual(icon.read_bytes(), (ROOT / "assets/jumpkut.svg").read_bytes())
         autostart = (self.autostart_dir / "jumpkut.desktop").read_text()
         self.assertNotIn("run.py", autostart)
-        self.assertIn(f"Exec={installer.quote_exec_argument(str(launcher))} --daemon\n", autostart)
+        self.assertIn(f"Exec={installer.exec_command(launcher)} --daemon\n", autostart)
         self.assertIn("Icon=edit-paste\n", autostart)
 
         # Reinstalling is idempotent and still leaves the data alone.

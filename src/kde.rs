@@ -274,7 +274,7 @@ impl Kde {
     }
 
     fn load_script(&self, name: &str, file: &str, source: &str) -> Result<i32, String> {
-        std::fs::create_dir_all(&self.script_dir).map_err(|e| e.to_string())?;
+        crate::paths::ensure_private_dir(&self.script_dir)?;
         let path = self.script_dir.join(file);
         std::fs::write(&path, source).map_err(|e| e.to_string())?;
         let _ = self.scripting("unloadScript", &(name,));
@@ -357,6 +357,29 @@ impl Kde {
         let id = self.load_script(&name, "windows.js", &source)?;
         self.script = Some(name);
         self.run_script(id, false)
+    }
+
+    /// The active keyboard layout index (the XKB group), if Plasma answers
+    /// within a moment.
+    pub fn layout(&self) -> Option<u32> {
+        let conn = self.conn.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let layout = conn
+                .call_method(
+                    Some("org.kde.keyboard"),
+                    "/Layouts",
+                    Some("org.kde.KeyboardLayouts"),
+                    "getLayout",
+                    &(),
+                )
+                .and_then(|reply| reply.body().deserialize::<u32>());
+            let _ = tx.send(layout);
+        });
+        rx.recv_timeout(Duration::from_millis(200))
+            .ok()?
+            .map_err(|e| eprintln!("Jumpkut: keyboard layout: {e}"))
+            .ok()
     }
 
     pub fn active(&self) -> Option<WindowInfo> {
@@ -582,17 +605,23 @@ impl Publisher {
     pub fn observe(&mut self, state: &str, text: Option<&str>) -> bool {
         self.live
             .retain_mut(|(child, _)| matches!(child.try_wait(), Ok(None)));
-        if self.state == Publish::Pending
-            && state == "sensitive"
-            && std::env::var_os("JUMPKUT_SENSITIVE_COPY").is_some()
-        {
+        let own_sensitive =
+            state == "sensitive" && std::env::var_os("JUMPKUT_SENSITIVE_COPY").is_some();
+        let wanted =
+            own_sensitive || (state == "data" && text.is_some() && text == self.wanted.as_deref());
+        if self.state == Publish::Done && !wanted {
+            // The clipboard changed again: ours is gone, so don't paste.
+            self.state = Publish::Idle;
+            return false;
+        }
+        if self.state == Publish::Pending && own_sensitive {
             self.state = Publish::Done;
             return false;
         }
         if self.state != Publish::Pending || state != "data" {
             return false;
         }
-        if text.is_some() && text == self.wanted.as_deref() {
+        if wanted {
             self.state = Publish::Done;
             self.superseded.clear();
             self.deadline = None;
@@ -663,4 +692,22 @@ pub fn wayland_problem() -> Option<String> {
         ));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_later_clipboard_change_invalidates_a_done_publication() {
+        let mut publisher = Publisher::new();
+        publisher.wanted = Some("A".into());
+        publisher.state = Publish::Pending;
+        assert!(!publisher.observe("data", Some("A")));
+        assert_eq!(publisher.state, Publish::Done);
+        publisher.observe("data", Some("A"));
+        assert_eq!(publisher.state, Publish::Done);
+        assert!(!publisher.observe("data", Some("B")));
+        assert_eq!(publisher.state, Publish::Idle);
+    }
 }

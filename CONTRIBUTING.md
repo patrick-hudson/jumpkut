@@ -64,7 +64,7 @@ Use `patch` for fixes, `minor` for new features, or `major` for breaking changes
 Commit the release version and changelog, land the change on `main`, then push an annotated tag matching the canonical version:
 
 ```sh
-version=$(./target/release/jumpkut --version | cut -d' ' -f2)
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)
 git tag -a "v$version" -m "Jumpkut $version"
 git push origin "v$version"
 ```

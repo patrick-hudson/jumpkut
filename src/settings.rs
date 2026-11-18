@@ -273,7 +273,13 @@ fn launch_command() -> String {
         }
         None => {
             let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("jumpkut"));
-            quote_exec_argument(&exe.to_string_lossy())
+            let quoted = quote_exec_argument(&exe.to_string_lossy());
+            // GLib rejects a program name containing `%%`: run it through env.
+            if quoted.contains('%') {
+                format!("/usr/bin/env {quoted}")
+            } else {
+                quoted
+            }
         }
     }
 }

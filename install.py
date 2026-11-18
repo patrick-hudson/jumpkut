@@ -107,6 +107,13 @@ def _replace_file(source: Path, target: Path, mode: int, text: str | None = None
         raise
 
 
+def exec_command(path: Path) -> str:
+    """The Exec program for `path`; GLib rejects a program name containing
+    `%%`, so such a path runs through env."""
+    quoted = quote_exec_argument(str(path))
+    return f"/usr/bin/env {quoted}" if "%" in quoted else quoted
+
+
 def autostart_path() -> Path:
     override = os.environ.get("JUMPKUT_AUTOSTART_DIR")
     if override and os.path.isabs(override):
@@ -128,10 +135,12 @@ def migrate_autostart(old_app: Path, launcher: Path) -> bool:
     for index, line in enumerate(lines):
         # The Python app wrote `/usr/bin/python3 <quoted run.py> --daemon`.
         if line.startswith("Exec=") and quote_exec_argument(str(old_app / "run.py")) in line:
-            lines[index] = f"Exec={quote_exec_argument(str(launcher))} --daemon\n"
+            lines[index] = f"Exec={exec_command(launcher)} --daemon\n"
             changed = True
-    if changed and not path.is_symlink():
-        _replace_file(path, path, 0o644, "".join(lines))
+    if changed:
+        # Update a linked entry's target rather than replacing the link.
+        target = path.resolve() if path.is_symlink() else path
+        _replace_file(target, target, 0o644, "".join(lines))
     return changed
 
 
@@ -153,7 +162,7 @@ def install(prefix: Path, binary: Path) -> Path:
         "Type=Application\n"
         "Name=Jumpkut\n"
         "Comment=Clipboard history and quick selection\n"
-        f"Exec={quote_exec_argument(str(launcher))} --history\n"
+        f"Exec={exec_command(launcher)} --history\n"
         "Icon=jumpkut\n"
         "Terminal=false\n"
         "Categories=Utility;\n"

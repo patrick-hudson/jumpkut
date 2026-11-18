@@ -188,13 +188,6 @@ fn main() {
 }
 
 fn run(command: &str) -> i32 {
-    let session = match detect_session() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{e}");
-            return 1;
-        }
-    };
     let conn = match instance::connect() {
         Ok(c) => c,
         Err(e) => {
@@ -219,10 +212,19 @@ fn run(command: &str) -> i32 {
             return 1;
         }
     }
-    match command {
-        "background" => return start_background(),
-        "quit" => return 0,
-        _ => {}
+    if command == "quit" {
+        return 0;
+    }
+    // Only a process that becomes (or spawns) the primary needs a session.
+    let session = match detect_session() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    if command == "background" {
+        return start_background();
     }
 
     // The primary instance.

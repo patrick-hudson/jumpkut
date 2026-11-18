@@ -10,7 +10,8 @@
 //!
 //! Both 1 and 2 send evdev keycodes, which depend on the keyboard layout, so
 //! the keys that produce Control_L / Shift_L / `v` are looked up in the
-//! compositor's current XKB keymap (e.g. Dvorak's V is not KEY_V).
+//! compositor's current XKB keymap (e.g. Dvorak's V is not KEY_V), in the
+//! active layout group when the caller knows it.
 
 use std::fs::File;
 use std::io::{Read, Seek, Write};
@@ -85,9 +86,10 @@ fn read_keymap(fd: OwnedFd, size: usize) -> Option<String> {
     String::from_utf8(bytes[..end].to_vec()).ok()
 }
 
-/// Evdev codes that produce Control_L, Shift_L and `v` in `keymap` (first
-/// layout that has them; Latin fallback for non-Latin layouts).
-pub fn chord_codes(keymap: Option<&str>) -> (u32, u32, u32) {
+/// Evdev codes that produce Control_L, Shift_L and `v` in `keymap`: in the
+/// active layout `group` if it has them, else the first layout that does
+/// (Latin fallback for non-Latin layouts).
+fn chord_codes(keymap: Option<&str>, group: u32) -> (u32, u32, u32) {
     let defaults = (KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_V);
     let (Some(text), Some(xkb)) = (keymap, xkbcommon_dl::xkbcommon_option()) else {
         return defaults;
@@ -114,7 +116,7 @@ pub fn chord_codes(keymap: Option<&str>) -> (u32, u32, u32) {
                 (xkb.xkb_keymap_max_keycode)(keymap),
             );
             for (slot, wanted) in [XK_CONTROL_L, XK_SHIFT_L, XK_V].iter().enumerate() {
-                'search: for layout in 0..4u32 {
+                'search: for layout in std::iter::once(group).chain(0..4u32) {
                     for code in min..=max {
                         if code < 8 || layout >= (xkb.xkb_keymap_num_layouts_for_key)(keymap, code)
                         {
@@ -177,9 +179,9 @@ impl Wayland {
         })
     }
 
-    fn codes(&mut self) -> (u32, u32, u32) {
+    fn codes(&mut self, group: u32) -> (u32, u32, u32) {
         let _ = self.queue.roundtrip(&mut self.state);
-        chord_codes(self.state.keymap.as_deref())
+        chord_codes(self.state.keymap.as_deref(), group)
     }
 
     fn tap(&mut self, codes: &[u32]) -> Result<(), String> {
@@ -369,12 +371,13 @@ impl Injector {
             || self.portal.is_some()
     }
 
-    /// Type Ctrl+V, or Ctrl+Shift+V when `terminal`.
-    pub fn paste(&mut self, terminal: bool) -> Result<&'static str, String> {
+    /// Type Ctrl+V, or Ctrl+Shift+V when `terminal`, with the keys of the
+    /// active layout `group` (0 when unknown).
+    pub fn paste(&mut self, terminal: bool, group: u32) -> Result<&'static str, String> {
         let (control, shift, v) = self
             .wayland
             .as_mut()
-            .map_or((KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_V), Wayland::codes);
+            .map_or((KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_V), |w| w.codes(group));
         let codes: Vec<u32> = if terminal {
             vec![control, shift, v]
         } else {

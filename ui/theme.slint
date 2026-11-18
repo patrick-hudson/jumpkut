@@ -42,6 +42,28 @@ export component KButton inherits Rectangle {
             root.clicked();
         }
     }
+    // Keyboard: Tab focuses, Space or Return activates. Clicks don't focus.
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    Rectangle {
+        visible: fs.has-focus;
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+    }
 }
 
 export component KCheck inherits Rectangle {
@@ -69,6 +91,16 @@ export component KCheck inherits Rectangle {
                     stroke: Theme.on-accent;
                     stroke-width: 2px;
                 }
+                Rectangle {
+                    visible: fs.has-focus;
+                    x: -3px;
+                    y: -3px;
+                    width: parent.width + 6px;
+                    height: parent.height + 6px;
+                    border-radius: 6px;
+                    border-width: 2px;
+                    border-color: Theme.accent;
+                }
             }
         }
         Text {
@@ -80,9 +112,23 @@ export component KCheck inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => {
-            root.checked = !root.checked;
-            root.toggled(root.checked);
+            root.toggle();
         }
+    }
+    // Keyboard: Tab focuses, Space toggles (Return reaches the window: Save). Clicks don't focus.
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Space) {
+                root.toggle();
+                return accept;
+            }
+            reject
+        }
+    }
+    function toggle() {
+        root.checked = !root.checked;
+        root.toggled(root.checked);
     }
 }
 

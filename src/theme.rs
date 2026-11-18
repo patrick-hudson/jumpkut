@@ -166,6 +166,9 @@ pub fn parse_ini(text: &str) -> HashMap<String, HashMap<String, String>> {
 pub fn parse_rgb(value: &str) -> Option<Rgb> {
     let value = value.trim();
     if let Some(hex) = value.strip_prefix('#') {
+        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         let hex = match hex.len() {
             6 => hex,
             8 => &hex[2..],
@@ -190,4 +193,16 @@ pub fn parse_qfont(value: &str) -> Option<(String, f32)> {
     let family = parts.next()?.trim();
     let size: f32 = parts.next()?.trim().parse().ok()?;
     (!family.is_empty() && size > 0.0).then(|| (family.to_owned(), size))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_colours() {
+        assert_eq!(parse_rgb("#3daee9"), Some(Rgb(0x3d, 0xae, 0xe9)));
+        assert_eq!(parse_rgb("#ff3daee9"), Some(Rgb(0x3d, 0xae, 0xe9)));
+        assert_eq!(parse_rgb("#a€aaaa"), None);
+    }
 }

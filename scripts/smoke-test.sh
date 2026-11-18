@@ -25,8 +25,18 @@ dbus-run-session -- bash -euo pipefail -c '
     "$1" --version
     "$1" --daemon >"$2/app.log" 2>&1 &
     app=$!
-    sleep 3
-    kill -0 "$app" || { cat "$2/app.log"; echo "Jumpkut exited during start-up" >&2; exit 1; }
+    # Wait until the daemon owns its bus name, so the commands below are
+    # forwarded to it instead of starting a second instance.
+    owned=
+    for _ in $(seq 100); do
+        kill -0 "$app" 2>/dev/null || { cat "$2/app.log"; echo "Jumpkut exited during start-up" >&2; exit 1; }
+        if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+            org.freedesktop.DBus.NameHasOwner string:io.github.jumpkut.Clipboard 2>/dev/null | grep -q "boolean true"; then
+            owned=1; break
+        fi
+        sleep 0.1
+    done
+    [ -n "$owned" ] || { cat "$2/app.log"; echo "Jumpkut did not claim its D-Bus name within 10 s" >&2; exit 1; }
     "$1" --history          # forwarded to the running instance
     "$1" --daemon           # forwarded; does not start a second one
     sleep 1

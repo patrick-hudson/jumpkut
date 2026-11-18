@@ -8,7 +8,7 @@
 //!   fake_keys x11-copy TEXT [--sensitive]             # own CLIPBOARD for 3 s
 //!
 //! `key+` presses, `key-` releases, `key` taps, `sleep:MS` waits. Keys: alt,
-//! ctrl, shift, v, c, up, down, esc, enter. The Wayland mode needs KWin to
+//! ctrl, shift, v, c, up, down, esc, enter, tab, space. The Wayland mode needs KWin to
 //! allow fake input (e.g. `KWIN_WAYLAND_NO_PERMISSION_CHECKS=1` in a nested
 //! test compositor); it is meant for isolated test sessions only.
 
@@ -25,6 +25,8 @@ const KEYS: &[(&str, u32, u32)] = &[
     ("down", 108, 0xff54),
     ("esc", 1, 0xff1b),
     ("enter", 28, 0xff0d),
+    ("tab", 15, 0xff09),
+    ("space", 57, 0x20),
     ("delete", 111, 0xffff),
     ("f", 33, 0x66),
     ("a", 30, 0x61),
@@ -318,7 +320,7 @@ fn x11_copy(text: &str, sensitive: bool, seconds: u64) {
             continue;
         };
         if let Event::SelectionRequest(r) = event {
-            let property = if r.property == 0 {
+            let mut property = if r.property == 0 {
                 r.target
             } else {
                 r.property
@@ -357,6 +359,9 @@ fn x11_copy(text: &str, sensitive: bool, seconds: u64) {
                     b"secret",
                 )
                 .unwrap();
+            } else {
+                // Refuse other targets (ICCCM: reply with property None).
+                property = x11rb::NONE;
             }
             let notify = SelectionNotifyEvent {
                 response_type: SELECTION_NOTIFY_EVENT,

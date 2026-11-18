@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{Sender, channel};
+use std::time::{Duration, Instant};
 
 use zbus::MatchRule;
 use zbus::blocking::{Connection, MessageIterator};
@@ -155,7 +156,10 @@ pub fn notify(body: String) {
 /// The RemoteDesktop portal keyboard. The first session shows KDE's
 /// permission dialog; its restore token (shared with the Python app, in
 /// `~/.local/state/jumpkut/remote-desktop-token`) makes later ones silent.
-type KeyRequest = (Vec<i32>, Sender<Result<(), String>>);
+/// Keysyms to tap, the reply channel, and the request's expiry: a paste
+/// still queued once `tap` gave up (e.g. behind the permission dialog) is
+/// dropped, never typed late.
+type KeyRequest = (Vec<i32>, Sender<Result<(), String>>, Instant);
 
 pub struct RemoteKeyboard {
     tx: Sender<KeyRequest>,
@@ -272,8 +276,9 @@ impl RemoteKeyboard {
             if let Err(e) = &session {
                 eprintln!("Jumpkut: {e}");
             }
-            for (keys, reply) in rx {
+            for (keys, reply, expiry) in rx {
                 let result = match &session {
+                    _ if Instant::now() >= expiry => Err("the paste request expired".into()),
                     Ok(s) => (|| {
                         for k in &keys {
                             s.key(*k, 1)?;
@@ -303,9 +308,12 @@ impl RemoteKeyboard {
 
     pub fn tap(&self, keysyms: Vec<i32>) -> Result<(), String> {
         let (reply, result) = channel();
-        self.tx.send((keysyms, reply)).map_err(|e| e.to_string())?;
+        let expiry = Instant::now() + Duration::from_secs(3);
+        self.tx
+            .send((keysyms, reply, expiry))
+            .map_err(|e| e.to_string())?;
         result
-            .recv_timeout(std::time::Duration::from_secs(3))
+            .recv_timeout(expiry.saturating_duration_since(Instant::now()))
             .map_err(|e| e.to_string())?
     }
 }

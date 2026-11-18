@@ -176,9 +176,11 @@ struct PrefsView {
     recording: bool,
 }
 
+/// Watches a Wayland publication until it succeeds or fails, then pastes
+/// into `target`, if any.
 struct PasteJob {
     generation: u64,
-    target: String,
+    target: Option<String>,
     deadline: Instant,
 }
 
@@ -444,11 +446,11 @@ impl App {
             format!("{} clips", self.history.len())
         };
         let tooltip = format!("Jumpkut {VERSION} · {status} · {}", self.shortcut.label());
-        let clips: Vec<String> = self
+        let clips: Vec<(String, String)> = self
             .history
             .recent(self.config.settings.tray_history_limit())
             .iter()
-            .map(|c| history::one_line(&c.text, 65, usize::MAX))
+            .map(|c| (c.id.clone(), history::one_line(&c.text, 65, usize::MAX)))
             .collect();
         let (count, paused) = (self.history.len(), self.paused);
         tray.update(move |t| {
@@ -609,11 +611,11 @@ impl App {
             }
             Ev::HistorySelect(index) => self.history_selected(index),
             Ev::HistoryCopy => {
-                if let Some(clip) = self.history_current() {
-                    self.select_clip(&clip, None);
-                    if let Some(view) = &self.history_view {
-                        view.window.set_status("Copied to clipboard".into());
-                    }
+                if let Some(clip) = self.history_current()
+                    && self.select_clip(&clip, None)
+                    && let Some(view) = &self.history_view
+                {
+                    view.window.set_status("Copied to clipboard".into());
                 }
             }
             Ev::HistoryDelete => {
@@ -621,7 +623,12 @@ impl App {
                     self.remove_clip(&clip.id);
                 }
             }
-            Ev::HistoryClosed => self.history_view = None,
+            // Hide before dropping: Slint keeps a visible window on screen.
+            Ev::HistoryClosed => {
+                if let Some(view) = self.history_view.take() {
+                    let _ = view.window.hide();
+                }
+            }
             Ev::PrefsRecord(text, modifiers) => {
                 if let Some(shortcut) = Shortcut::from_slint(&text, modifiers) {
                     self.set_recorded_shortcut(shortcut.accel());
@@ -634,8 +641,16 @@ impl App {
                 }
             }
             Ev::PrefsSave => self.save_preferences(),
-            Ev::PrefsClosed => self.prefs = None,
-            Ev::AboutClosed => self.about = None,
+            Ev::PrefsClosed => {
+                if let Some(view) = self.prefs.take() {
+                    let _ = view.window.hide();
+                }
+            }
+            Ev::AboutClosed => {
+                if let Some(about) = self.about.take() {
+                    let _ = about.hide();
+                }
+            }
             Ev::MessageAnswered(id, ok) => {
                 if let Some(pos) = self.messages.iter().position(|(i, ..)| *i == id) {
                     let (_, window, follow_up) = self.messages.remove(pos);
@@ -898,7 +913,9 @@ impl App {
 
     // ----- selection, clipboard, paste -------------------------------------
 
-    fn select_clip(&mut self, clip: &Clip, target: Option<Target>) {
+    /// Copies the clipping and pastes it into `target` if enabled. False if
+    /// the copy failed outright (a Wayland publication is reported later).
+    fn select_clip(&mut self, clip: &Clip, target: Option<Target>) -> bool {
         self.last_selected = Some(clip.id.clone());
         // Our own write comes back through the watcher: don't re-record it.
         self.ignore_text = Some(clip.text.clone());
@@ -920,25 +937,32 @@ impl App {
         };
         if let Err(e) = copied {
             self.notify(&format!("Could not copy the clipping: {e}."));
-            return;
+            return false;
         }
-        if !self.config.settings.auto_paste || !self.backend_ok {
-            return;
-        }
+        let paste = self.config.settings.auto_paste && self.backend_ok;
         match target {
-            Some(Target::X11(window)) => {
+            Some(Target::X11(window)) if paste => {
                 if let Some(x) = &self.x11 {
                     x.send(x11::Command::Paste(Some(window)));
                 }
             }
-            Some(Target::Kde(id))
-                if !self.is_own(&id) && self.injector.as_ref().is_some_and(|i| i.available()) =>
-            {
+            _ if self.session == Session::KdeWayland => {
+                // Monitor every publication; paste only when enabled.
+                let target = match target {
+                    Some(Target::Kde(id))
+                        if paste
+                            && !self.is_own(&id)
+                            && self.injector.as_ref().is_some_and(|i| i.available()) =>
+                    {
+                        Some(id)
+                    }
+                    _ => None,
+                };
                 self.paste_generation += 1;
                 let generation = self.paste_generation;
                 self.paste_job = Some(PasteJob {
                     generation,
-                    target: id,
+                    target,
                     deadline: Instant::now() + Duration::from_millis(1500),
                 });
                 self.paste_timer.start(
@@ -949,6 +973,7 @@ impl App {
             }
             _ => {}
         }
+        true
     }
 
     /// One step of the Wayland paste: wait until wl-copy owns the clipboard
@@ -969,16 +994,22 @@ impl App {
             app.paste_job = None;
             app.paste_timer.stop();
         };
-        if Instant::now() > job.deadline || self.publisher.state == Publish::Failed {
+        // Idle: another copy replaced ours before the paste.
+        if Instant::now() > job.deadline
+            || matches!(self.publisher.state, Publish::Failed | Publish::Idle)
+        {
             return done(self);
         }
         if self.publisher.state != Publish::Done {
             return;
         }
+        let Some(target) = &job.target else {
+            return done(self); // published; nothing to paste into
+        };
         let Some(active) = self.kde.as_ref().and_then(Kde::active) else {
             return;
         };
-        if active.id != job.target || active.pid == std::process::id().to_string() {
+        if &active.id != target || active.pid == std::process::id().to_string() {
             return; // KWin returns focus asynchronously after the popup hides
         }
         let terminal = x11::is_terminal_class(&active.class);
@@ -1001,8 +1032,9 @@ impl App {
             }
             return done(self);
         }
+        let group = self.kde.as_ref().and_then(Kde::layout).unwrap_or(0);
         if let Some(injector) = self.injector.as_mut()
-            && let Err(e) = injector.paste(terminal)
+            && let Err(e) = injector.paste(terminal, group)
         {
             self.notify(&format!(
                 "Could not paste: {e}. The clipping was copied; paste it with Ctrl+V."
@@ -1077,13 +1109,9 @@ impl App {
             self.cancel_popup(true);
         }
         match action {
-            tray::Action::Clip(index) => {
-                let Some(clip) = self
-                    .history
-                    .recent(self.config.settings.tray_history_limit())
-                    .get(index)
-                    .cloned()
-                else {
+            tray::Action::Clip(id) => {
+                // Deleted since the menu was built: select nothing else.
+                let Some(clip) = self.history.get(&id).cloned() else {
                     return;
                 };
                 let target = match self.session {
@@ -1417,7 +1445,9 @@ impl App {
         self.prepare_paste();
         self.update_popup_texts();
         self.update_tray();
-        self.prefs = None;
+        if let Some(view) = self.prefs.take() {
+            let _ = view.window.hide();
+        }
         if let Err(e) = settings::set_autostart(startup) {
             self.message(
                 "Preferences were saved, but some changes could not be written.",

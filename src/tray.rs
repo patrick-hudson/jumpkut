@@ -7,9 +7,10 @@ use std::sync::Arc;
 use ksni::menu::{CheckmarkItem, StandardItem};
 use ksni::{MenuItem, ToolTip, Tray};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Action {
-    Clip(usize),
+    /// A clipping, by id: history may change before the action runs.
+    Clip(String),
     FullHistory,
     Preferences,
     About,
@@ -23,7 +24,8 @@ pub enum Action {
 pub struct JumpkutTray {
     pub tooltip: String,
     pub count: usize,
-    pub clips: Vec<String>,
+    /// (clipping id, menu preview), newest first.
+    pub clips: Vec<(String, String)>,
     pub paused: bool,
     pub icons: Vec<ksni::Icon>,
     pub on_action: Arc<dyn Fn(Action) + Send + Sync>,
@@ -38,7 +40,7 @@ impl JumpkutTray {
     fn item(&self, text: &str, action: Action) -> MenuItem<Self> {
         StandardItem {
             label: label(text),
-            activate: Box::new(move |tray: &mut Self| (tray.on_action)(action)),
+            activate: Box::new(move |tray: &mut Self| (tray.on_action)(action.clone())),
             ..Default::default()
         }
         .into()
@@ -82,8 +84,11 @@ impl Tray for JumpkutTray {
             "Clipboard History · {} clips",
             self.count
         ))];
-        for (index, preview) in self.clips.iter().enumerate() {
-            items.push(self.item(&format!("{}.  {preview}", index + 1), Action::Clip(index)));
+        for (index, (id, preview)) in self.clips.iter().enumerate() {
+            items.push(self.item(
+                &format!("{}.  {preview}", index + 1),
+                Action::Clip(id.clone()),
+            ));
         }
         if self.clips.is_empty() {
             items.push(Self::disabled("Copy some text to start your history"));

@@ -746,6 +746,9 @@ struct Watcher {
     property: u32,
     sensitive: Vec<u32>,
     pending: bool,
+    /// Counts CLIPBOARD ownership changes seen, so a capture can tell
+    /// whether its TARGETS check and text read saw the same owner.
+    changes: u64,
 }
 
 impl Watcher {
@@ -762,6 +765,7 @@ impl Watcher {
                 Ok(Some(event)) => {
                     if matches!(event, Event::XfixesSelectionNotify(_)) {
                         self.pending = true;
+                        self.changes = self.changes.wrapping_add(1);
                     }
                     if let Some(v) = want(&event) {
                         return Some(v);
@@ -866,16 +870,38 @@ impl Watcher {
         }
     }
 
-    fn capture(&mut self) -> ClipboardChange {
-        let owner = self
-            .conn
+    fn owner(&self) -> Option<u32> {
+        self.conn
             .get_selection_owner(self.clipboard)
             .ok()
             .and_then(|c| c.reply().ok())
-            .map(|r| r.owner);
-        if owner.is_none_or(|o| o == x11rb::NONE) {
-            return ClipboardChange::Nothing;
+            .map(|r| r.owner)
+    }
+
+    /// Read the clipboard text, unless its TARGETS mark it as sensitive. The
+    /// check and the read must see one ownership: if the owner changed in
+    /// between (say a password manager took over), discard and start again.
+    fn capture(&mut self) -> ClipboardChange {
+        for _ in 0..5 {
+            self.pending = false;
+            let changes = self.changes;
+            let owner = self.owner();
+            if owner.is_none_or(|o| o == x11rb::NONE) {
+                return ClipboardChange::Nothing;
+            }
+            let result = self.capture_once();
+            // The owner reply is a round trip: ownership-change events sent
+            // before it are queued by then; drain them into `changes`.
+            let same_owner = self.owner() == owner;
+            let _ = self.wait(Duration::ZERO, |_| None::<()>);
+            if same_owner && self.changes == changes {
+                return result;
+            }
         }
+        ClipboardChange::Nothing
+    }
+
+    fn capture_once(&mut self) -> ClipboardChange {
         let Some((_, targets)) = self.read(self.targets) else {
             return ClipboardChange::Nothing;
         };
@@ -944,6 +970,7 @@ pub fn watch_clipboard(
         conn,
         window,
         pending: false,
+        changes: 0,
     };
     watcher
         .conn
