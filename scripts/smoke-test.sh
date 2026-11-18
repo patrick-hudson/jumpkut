@@ -18,6 +18,7 @@ display=:$((90 + RANDOM % 100))
 Xvfb "$display" -screen 0 1280x800x24 -nolisten tcp >"$work/xvfb.log" 2>&1 &
 xvfb=$!
 sleep 1
+export JUMPKUT_BUS_NAME=io.github.jumpkut.SmokeTest
 export DISPLAY=$display XDG_SESSION_TYPE=x11 XDG_CONFIG_HOME=$work/config XDG_DATA_HOME=$work/data \
     XDG_STATE_HOME=$work/state XDG_CACHE_HOME=$work/cache XDG_RUNTIME_DIR=$work/runtime
 unset WAYLAND_DISPLAY
@@ -31,7 +32,7 @@ dbus-run-session -- bash -euo pipefail -c '
     for _ in $(seq 100); do
         kill -0 "$app" 2>/dev/null || { cat "$2/app.log"; echo "Jumpkut exited during start-up" >&2; exit 1; }
         if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
-            org.freedesktop.DBus.NameHasOwner string:io.github.jumpkut.Clipboard 2>/dev/null | grep -q "boolean true"; then
+            org.freedesktop.DBus.NameHasOwner "string:$JUMPKUT_BUS_NAME" 2>/dev/null | grep -q "boolean true"; then
             owned=1; break
         fi
         sleep 0.1

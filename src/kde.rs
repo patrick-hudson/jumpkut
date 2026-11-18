@@ -143,7 +143,7 @@ pub struct Kde {
     registered: bool,
     listening: bool,
     script: Option<String>,
-    script_dir: std::path::PathBuf,
+    script_dir: Option<std::path::PathBuf>,
     pub windows: Arc<Mutex<ActiveWindows>>,
 }
 
@@ -274,8 +274,12 @@ impl Kde {
     }
 
     fn load_script(&self, name: &str, file: &str, source: &str) -> Result<i32, String> {
-        crate::paths::ensure_private_dir(&self.script_dir)?;
-        let path = self.script_dir.join(file);
+        let dir = self
+            .script_dir
+            .as_ref()
+            .ok_or("No private directory for KWin scripts is available.")?;
+        crate::paths::ensure_private_dir(dir)?;
+        let path = dir.join(file);
         std::fs::write(&path, source).map_err(|e| e.to_string())?;
         let _ = self.scripting("unloadScript", &(name,));
         let id: i32 = self
@@ -417,7 +421,9 @@ impl Kde {
             .conn
             .object_server()
             .remove::<WindowsObject, _>(WINDOWS_PATH);
-        let _ = std::fs::remove_dir_all(&self.script_dir);
+        if let Some(dir) = &self.script_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
         if self.registered {
             self.registered = false;
             if self.component == "jumpkut" {

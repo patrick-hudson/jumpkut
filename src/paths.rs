@@ -62,28 +62,57 @@ pub fn autostart_path() -> PathBuf {
 
 /// A private (mode 0700, owned by us) per-process directory for files other
 /// processes read by path, such as KWin scripts. Under `$XDG_RUNTIME_DIR`
-/// when that is set, otherwise under the state directory, never a shared
-/// temporary directory. Created on first use; every call returns the same
-/// path, so shutdown removes the directory that was used.
-pub fn runtime_dir() -> PathBuf {
-    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+/// when that is ours and not writable by others, otherwise under the state
+/// directory, never a shared temporary directory. `None` when neither is
+/// safe. Created on first use; every call returns the same path, so shutdown
+/// removes the directory that was used.
+pub fn runtime_dir() -> Option<PathBuf> {
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
         let name = format!("jumpkut-{}", std::process::id());
-        let fallback = state_dir().join("run");
-        if let Some(base) = overridden("XDG_RUNTIME_DIR") {
-            let dir = base.join(&name);
-            match ensure_private_dir(&dir) {
-                Ok(()) => return dir,
-                Err(e) => eprintln!("Jumpkut: {e}"),
-            }
+        let result = choose_runtime_dir(
+            overridden("XDG_RUNTIME_DIR").as_deref(),
+            &state_dir().join("run"),
+            &name,
+        );
+        if result.is_none() {
+            eprintln!("Jumpkut: no private runtime directory is available.");
         }
-        let dir = fallback.join(&name);
-        if let Err(e) = ensure_private_dir(&fallback).and_then(|()| ensure_private_dir(&dir)) {
-            eprintln!("Jumpkut: {e}");
-        }
-        dir
+        result
     })
     .clone()
+}
+
+fn choose_runtime_dir(
+    base: Option<&std::path::Path>,
+    fallback: &std::path::Path,
+    name: &str,
+) -> Option<PathBuf> {
+    // Only a parent no one else can write to keeps the child from being
+    // replaced after it is checked.
+    if let Some(base) = base.filter(|b| owned_not_shared(b)) {
+        let dir = base.join(name);
+        match ensure_private_dir(&dir) {
+            Ok(()) => return Some(dir),
+            Err(e) => eprintln!("Jumpkut: {e}"),
+        }
+    }
+    let dir = fallback.join(name);
+    match ensure_private_dir(fallback).and_then(|()| ensure_private_dir(&dir)) {
+        Ok(()) => Some(dir),
+        Err(e) => {
+            eprintln!("Jumpkut: {e}");
+            None
+        }
+    }
+}
+
+/// `dir` is a directory owned by us that group and others cannot write to.
+fn owned_not_shared(dir: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: geteuid has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    std::fs::metadata(dir).is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o022 == 0)
 }
 
 /// Create `dir` with mode 0700, or accept an existing one only if it is a
@@ -110,4 +139,29 @@ pub fn ensure_private_dir(dir: &std::path::Path) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_shared_runtime_parent_falls_back_to_the_private_state_dir() {
+        let root = std::env::temp_dir().join(format!("jumpkut-rt-{}", std::process::id()));
+        let shared = root.join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let fallback = root.join("state/run");
+        let dir = choose_runtime_dir(Some(&shared), &fallback, "jumpkut-1").unwrap();
+        assert_eq!(dir, fallback.join("jumpkut-1"));
+        assert!(!shared.join("jumpkut-1").exists());
+        // An existing directory that others can enter is refused outright.
+        std::fs::set_permissions(&fallback, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            choose_runtime_dir(Some(&shared), &fallback, "jumpkut-2"),
+            None
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }

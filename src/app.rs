@@ -182,6 +182,8 @@ struct PasteJob {
     generation: u64,
     target: Option<String>,
     deadline: Instant,
+    /// Show the outcome in Full History's status line.
+    report: bool,
 }
 
 pub struct App {
@@ -613,9 +615,12 @@ impl App {
             Ev::HistoryCopy => {
                 if let Some(clip) = self.history_current()
                     && self.select_clip(&clip, None)
-                    && let Some(view) = &self.history_view
                 {
-                    view.window.set_status("Copied to clipboard".into());
+                    match self.paste_job.as_mut() {
+                        // Wayland: reported once wl-copy owns the clipboard.
+                        Some(job) => job.report = true,
+                        None => self.history_status("Copied to clipboard"),
+                    }
                 }
             }
             Ev::HistoryDelete => {
@@ -722,7 +727,10 @@ impl App {
     }
 
     fn show_popup(&mut self, held: bool, at: Option<Instant>) {
-        self.paste_job = None;
+        // Cancel a pending paste, but keep watching its publication.
+        if let Some(job) = self.paste_job.as_mut() {
+            job.target = None;
+        }
         if self.picker.is_open() {
             return;
         }
@@ -964,6 +972,7 @@ impl App {
                     generation,
                     target,
                     deadline: Instant::now() + Duration::from_millis(1500),
+                    report: false,
                 });
                 self.paste_timer.start(
                     slint::TimerMode::Repeated,
@@ -974,6 +983,12 @@ impl App {
             _ => {}
         }
         true
+    }
+
+    fn history_status(&self, text: &str) {
+        if let Some(view) = &self.history_view {
+            view.window.set_status(text.into());
+        }
     }
 
     /// One step of the Wayland paste: wait until wl-copy owns the clipboard
@@ -989,6 +1004,13 @@ impl App {
         };
         if let Some(message) = self.publisher.poll() {
             self.notify(&message);
+        }
+        if job.report {
+            match self.publisher.state {
+                Publish::Done => self.history_status("Copied to clipboard"),
+                Publish::Failed => self.history_status("Could not copy the clipping"),
+                _ => {}
+            }
         }
         let done = |app: &mut App| {
             app.paste_job = None;
@@ -1687,7 +1709,9 @@ impl App {
         if let Err(e) = self.history.close() {
             eprintln!("Jumpkut: History could not be saved before exit: {e}");
         }
-        let _ = std::fs::remove_dir_all(crate::paths::runtime_dir());
+        if let Some(dir) = crate::paths::runtime_dir() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
 
