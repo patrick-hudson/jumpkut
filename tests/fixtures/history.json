@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "clips": [
+    {
+      "id": "8f14e45fceea167a5a36dedd4bea2543",
+      "text": "  café 🦊\n第二行\t\"\\ ",
+      "created_at": 1700000000.125
+    },
+    {
+      "id": "second",
+      "text": "é\r\n \u0001\u001f\b\f",
+      "created_at": 1e-07
+    },
+    {
+      "id": "third",
+      "text": "big",
+      "created_at": 1.7e+20
+    },
+    {
+      "id": "fourth",
+      "text": "integral",
+      "created_at": 1731648000.0
+    },
+    {
+      "id": "fifth",
+      "text": "typical",
+      "created_at": 1763168880.5212345
+    },
+    {
+      "id": "sixth",
+      "text": "<html> & 'quotes' </html>",
+      "created_at": 0.5
+    }
+  ]
+}

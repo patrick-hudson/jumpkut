@@ -8,5 +8,6 @@ Icon=jumpkut
 Terminal=false
 Categories=Utility;
 Keywords=clipboard;history;copy;paste;
-StartupWMClass=Jumpkut
+StartupWMClass=jumpkut
 StartupNotify=false
+X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "clips": [
+    {
+      "id": "b1",
+      "text": "shared text",
+      "created_at": 150.0
+    },
+    {
+      "id": "dup",
+      "text": "foreign with colliding id",
+      "created_at": 120.0
+    },
+    {
+      "id": "b3",
+      "text": "only backup",
+      "created_at": 50.0
+    }
+  ]
+}

@@ -1,0 +1,656 @@
+// Decorated windows (title bar from the compositor): Full History,
+// Preferences, About, and a small message/confirmation dialog.
+import { ListView, ScrollView, AboutSlint } from "std-widgets.slint";
+import { Theme, KButton, KCheck, KLineEdit, KSpin, KSeparator } from "theme.slint";
+
+export struct HistoryRow {
+    id: string,
+    rank: int,
+    preview: string,
+    copied: string,
+}
+
+export component HistoryWindow inherits Window {
+    title: "Jumpkut — Full history";
+    icon: @image-url("../assets/jumpkut.svg");
+    preferred-width: 940px;
+    preferred-height: 620px;
+    min-width: 720px;
+    min-height: 440px;
+    background: Theme.window-bg;
+    default-font-family: Theme.font-family;
+    default-font-size: Theme.font-size;
+
+    in property <[HistoryRow]> rows;
+    in-out property <int> current: -1;
+    in property <string> count-text;
+    in property <string> preview-text;
+    in property <string> status;
+    in property <bool> has-selection;
+    in-out property <string> query;
+    callback search-changed(string);
+    callback selected(int);
+    callback copy();
+    callback delete();
+    callback backup();
+    callback restore();
+    callback close-window();
+
+    property <length> row-height: 30px;
+
+    function show-row(index: int) {
+        if (index < 0 || index >= rows.length) {
+            return;
+        }
+        root.current = index;
+        root.selected(index);
+        // Keep the row visible.
+        if (index * row-height < -list.content-y) {
+            list.content-y = -index * row-height;
+        } else if ((index + 1) * row-height > -list.content-y + list.visible-height) {
+            list.content-y = -((index + 1) * row-height - list.visible-height);
+        }
+    }
+
+    public function focus-list() {
+        keys.focus();
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.control && event.text.to-lowercase() == "f") {
+                search.grab-focus();
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                if (search.text != "") {
+                    search.text = "";
+                    root.search-changed("");
+                } else {
+                    root.close-window();
+                }
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.show-row(min(root.current + 1, root.rows.length - 1));
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.show-row(max(root.current - 1, 0));
+                return accept;
+            }
+            if (event.text == Key.PageDown) {
+                root.show-row(min(root.current + 10, root.rows.length - 1));
+                return accept;
+            }
+            if (event.text == Key.PageUp) {
+                root.show-row(max(root.current - 10, 0));
+                return accept;
+            }
+            if (event.text == Key.Home) {
+                root.show-row(0);
+                return accept;
+            }
+            if (event.text == Key.End) {
+                root.show-row(root.rows.length - 1);
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.copy();
+                return accept;
+            }
+            if (event.text == Key.Delete) {
+                root.delete();
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 12px;
+
+            HorizontalLayout {
+                spacing: 12px;
+                Image {
+                    source: @image-url("../assets/jumpkut.svg");
+                    width: 36px;
+                    height: 36px;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "Full history";
+                        color: Theme.fg;
+                        font-size: Theme.font-size * 1.45;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.count-text;
+                        color: Theme.muted;
+                    }
+                }
+            }
+
+            search := KLineEdit {
+                placeholder: "Search all clipboard text…";
+                text <=> root.query;
+                edited(text) => {
+                    root.search-changed(text);
+                }
+                accepted => {
+                    keys.focus();
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 14px;
+                vertical-stretch: 1;
+
+                // Clipping list.
+                Rectangle {
+                    horizontal-stretch: 5;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    background: Theme.view-bg;
+                    clip: true;
+                    VerticalLayout {
+                        padding: 1px;
+                        Rectangle {
+                            height: 28px;
+                            background: Theme.window-bg.with-alpha(0.6);
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 12px;
+                                spacing: 10px;
+                                Text {
+                                    width: 34px;
+                                    text: "#";
+                                    color: Theme.muted;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "Clipping";
+                                    color: Theme.muted;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    width: 118px;
+                                    text: "Copied";
+                                    color: Theme.muted;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        KSeparator { }
+                        list := ListView {
+                            for row[index] in root.rows: Rectangle {
+                                height: root.row-height;
+                                background: index == root.current ? Theme.selection : rta.has-hover ? Theme.hover : transparent;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+                                    Text {
+                                        width: 34px;
+                                        text: row.rank;
+                                        color: Theme.muted;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: row.preview;
+                                        color: Theme.fg;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                    Text {
+                                        width: 118px;
+                                        text: row.copied;
+                                        color: Theme.muted;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                rta := TouchArea {
+                                    clicked => {
+                                        root.show-row(index);
+                                        keys.focus();
+                                    }
+                                    double-clicked => {
+                                        root.show-row(index);
+                                        root.copy();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Full text.
+                VerticalLayout {
+                    horizontal-stretch: 4;
+                    spacing: 8px;
+                    Text {
+                        text: "Full clipping";
+                        color: Theme.muted;
+                    }
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: root.has-selection ? Theme.accent.with-alpha(0.6) : Theme.border;
+                        background: Theme.view-bg;
+                        clip: true;
+                        ScrollView {
+                            content-width: self.visible-width;
+                            content-height: max(self.visible-height, full.preferred-height + 24px);
+                            full := TextInput {
+                                x: 12px;
+                                y: 12px;
+                                width: parent.width - 24px;
+                                height: self.preferred-height;
+                                text: root.preview-text;
+                                read-only: true;
+                                wrap: word-wrap;
+                                color: root.has-selection ? Theme.fg : Theme.muted;
+                                single-line: false;
+                                selection-background-color: Theme.selection;
+                                selection-foreground-color: Theme.fg;
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                KButton {
+                    text: "Copy";
+                    primary: true;
+                    enabled: root.has-selection;
+                    clicked => {
+                        root.copy();
+                    }
+                }
+                KButton {
+                    text: "Delete";
+                    enabled: root.has-selection;
+                    clicked => {
+                        root.delete();
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                KButton {
+                    text: "Back Up History…";
+                    clicked => {
+                        root.backup();
+                    }
+                }
+                KButton {
+                    text: "Restore Backup…";
+                    clicked => {
+                        root.restore();
+                    }
+                }
+            }
+            Text {
+                text: root.status;
+                color: Theme.muted;
+            }
+        }
+    }
+}
+
+export component PreferencesWindow inherits Window {
+    forward-focus: keys;
+    title: "Jumpkut Preferences";
+    icon: @image-url("../assets/jumpkut.svg");
+    width: 480px;
+    background: Theme.window-bg;
+    default-font-family: Theme.font-family;
+    default-font-size: Theme.font-size;
+
+    in-out property <string> shortcut-label;
+    in-out property <bool> recording;
+    in-out property <bool> custom-quick;
+    in-out property <int> quick-limit: 30;
+    in-out property <bool> custom-tray;
+    in-out property <int> tray-limit: 10;
+    in-out property <bool> startup;
+    in-out property <bool> resume;
+    in-out property <bool> sticky;
+    in-out property <bool> paste;
+    in property <string> version;
+    // Returns true once a valid shortcut was recorded.
+    callback record-key(string, bool, bool, bool, bool) -> bool;
+    callback start-recording();
+    callback stop-recording();
+    callback save();
+    callback cancel();
+    callback backup();
+    callback restore();
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (root.recording) {
+                if (event.text == Key.Escape) {
+                    root.stop-recording();
+                } else {
+                    root.record-key(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
+                }
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.save();
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            padding: 22px;
+            spacing: 14px;
+
+            HorizontalLayout {
+                spacing: 12px;
+                Image {
+                    source: @image-url("../assets/jumpkut.svg");
+                    width: 32px;
+                    height: 32px;
+                }
+                Text {
+                    text: "Clipboard history, your way";
+                    color: Theme.fg;
+                    font-weight: 700;
+                    font-size: Theme.font-size * 1.15;
+                    vertical-alignment: center;
+                }
+            }
+
+            GridLayout {
+                spacing-horizontal: 18px;
+                spacing-vertical: 12px;
+                Row {
+                    Text {
+                        text: "Keyboard shortcut";
+                        color: Theme.fg;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        min-height: 30px;
+                        border-radius: 5px;
+                        border-width: 1px;
+                        border-color: root.recording || sta.has-hover ? Theme.accent : Theme.border;
+                        background: root.recording ? Theme.hover : Theme.button-bg;
+                        Text {
+                            text: root.recording ? "Press shortcut…" : root.shortcut-label;
+                            color: root.recording ? Theme.accent : Theme.fg;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        sta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.start-recording();
+                                keys.focus();
+                            }
+                        }
+                    }
+                }
+                Row {
+                    KCheck {
+                        text: "Custom quick history length";
+                        checked <=> root.custom-quick;
+                    }
+                    KSpin {
+                        value <=> root.quick-limit;
+                        enabled: root.custom-quick;
+                    }
+                }
+                Row {
+                    KCheck {
+                        text: "Custom tray history length";
+                        checked <=> root.custom-tray;
+                    }
+                    KSpin {
+                        value <=> root.tray-limit;
+                        enabled: root.custom-tray;
+                    }
+                }
+            }
+            Text {
+                text: "Defaults: quick picker 30, tray menu 10.\nFull History keeps all clippings until you delete them.";
+                color: Theme.muted;
+                wrap: word-wrap;
+            }
+            KCheck {
+                text: "Run at startup";
+                checked <=> root.startup;
+            }
+            KCheck {
+                text: "Resume last selection";
+                checked <=> root.resume;
+            }
+            KCheck {
+                text: "Keep history open until Enter";
+                checked <=> root.sticky;
+            }
+            KCheck {
+                text: "Paste automatically into the previous app";
+                checked <=> root.paste;
+            }
+            KSeparator { }
+            HorizontalLayout {
+                spacing: 10px;
+                KButton {
+                    text: "Back Up History…";
+                    horizontal-stretch: 1;
+                    clicked => {
+                        root.backup();
+                    }
+                }
+                KButton {
+                    text: "Restore Backup…";
+                    horizontal-stretch: 1;
+                    clicked => {
+                        root.restore();
+                    }
+                }
+            }
+            Text {
+                text: "History and backups contain plain text. Password-manager\nclippings marked as sensitive are skipped.";
+                color: Theme.muted;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: "Jumpkut \{root.version}";
+                    color: Theme.muted;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                KButton {
+                    text: "Cancel";
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+                KButton {
+                    text: "Save";
+                    primary: true;
+                    clicked => {
+                        root.save();
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AboutWindow inherits Window {
+    forward-focus: keys;
+    title: "About Jumpkut";
+    icon: @image-url("../assets/jumpkut.svg");
+    width: 420px;
+    background: Theme.window-bg;
+    default-font-family: Theme.font-family;
+    default-font-size: Theme.font-size;
+    in property <string> version;
+    callback close-window();
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape || event.text == Key.Return) {
+                root.close-window();
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 10px;
+            alignment: start;
+            Image {
+                source: @image-url("../assets/jumpkut.svg");
+                height: 72px;
+                image-fit: contain;
+            }
+            Text {
+                text: "Jumpkut";
+                color: Theme.fg;
+                font-size: Theme.font-size * 1.6;
+                font-weight: 700;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "Version \{root.version}";
+                color: Theme.muted;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "Clipboard history for Linux. Copy, browse, and paste with a keyboard shortcut.";
+                color: Theme.fg;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "MIT License · github.com/patrick-hudson/jumpkut";
+                color: Theme.muted;
+                horizontal-alignment: center;
+            }
+            KSeparator { }
+            Text {
+                text: "Made with Slint, used under the Slint Royalty-free License.";
+                color: Theme.muted;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            AboutSlint {
+                height: 110px;
+            }
+            HorizontalLayout {
+                alignment: end;
+                KButton {
+                    text: "Close";
+                    primary: true;
+                    clicked => {
+                        root.close-window();
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component MessageWindow inherits Window {
+    forward-focus: keys;
+    title: "Jumpkut";
+    icon: @image-url("../assets/jumpkut.svg");
+    width: 420px;
+    background: Theme.window-bg;
+    default-font-family: Theme.font-family;
+    default-font-size: Theme.font-size;
+    in property <string> heading;
+    in property <string> body;
+    in property <bool> error;
+    in property <bool> confirm;
+    in property <string> ok-text: "Close";
+    callback answered(bool);
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.answered(false);
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.answered(true);
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 22px;
+            spacing: 14px;
+            HorizontalLayout {
+                spacing: 14px;
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 16px;
+                    background: root.error ? #da4453 : Theme.accent;
+                    Text {
+                        text: root.error ? "!" : root.confirm ? "?" : "i";
+                        color: white;
+                        font-weight: 800;
+                        font-size: 18px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: root.heading;
+                        color: Theme.fg;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: root.body;
+                        color: Theme.muted;
+                        wrap: word-wrap;
+                        visible: root.body != "";
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                if root.confirm: KButton {
+                    text: "Cancel";
+                    clicked => {
+                        root.answered(false);
+                    }
+                }
+                KButton {
+                    text: root.ok-text;
+                    primary: true;
+                    clicked => {
+                        root.answered(true);
+                    }
+                }
+            }
+        }
+    }
+}

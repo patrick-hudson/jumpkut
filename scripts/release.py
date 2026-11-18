@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Release the pending changelog notes and update Jumpkut's canonical version."""
+"""Release the pending changelog notes and bump Jumpkut's canonical version.
+
+The version lives in Cargo.toml (`[package] version`); Cargo.lock's entry for
+the jumpkut package is updated to match, without network access.
+"""
 
 import argparse
 from datetime import date as calendar_date
@@ -13,7 +17,7 @@ import tempfile
 VERSION = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
 
 
-def _write_atomic(path: Path, text: str, *, invalidate_bytecode=False):
+def _write_atomic(path: Path, text: str):
     temporary = None
     original = path.stat()
     try:
@@ -24,16 +28,37 @@ def _write_atomic(path: Path, text: str, *, invalidate_bytecode=False):
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
-            written = os.fstat(stream.fileno())
-            # Python's timestamp caches use whole seconds and file size. Version
-            # bumps can retain both, including caches outside __pycache__.
-            if invalidate_bytecode and int(written.st_mtime) == int(original.st_mtime):
-                os.utime(stream.fileno(), ns=(written.st_atime_ns,
-                                             written.st_mtime_ns + 1_000_000_000))
         os.replace(temporary, path)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def package_version(manifest: str) -> "_Shifted":
+    """The `version = "X.Y.Z"` match inside Cargo.toml's [package] table."""
+    table = re.search(r"(?ms)^\[package\][ \t]*\n(.*?)(?=^\[|\Z)", manifest)
+    if table is None:
+        raise ValueError("Cargo.toml must contain a [package] table")
+    versions = list(re.finditer(rf'(?m)^version[ \t]*=[ \t]*"({VERSION})"[ \t]*$', table.group(1)))
+    if len(versions) != 1:
+        raise ValueError("Cargo.toml [package] must contain one numeric X.Y.Z version")
+    return _Shifted(versions[0], table.start(1))
+
+
+class _Shifted:
+    """A regex match whose positions are shifted into the whole file."""
+
+    def __init__(self, match: re.Match, offset: int):
+        self._match, self._offset = match, offset
+
+    def group(self, index=0):
+        return self._match.group(index)
+
+    def start(self, index=0):
+        return self._match.start(index) + self._offset
+
+    def end(self, index=0):
+        return self._match.end(index) + self._offset
 
 
 def release(root: Path, kind: str, date: str | None = None) -> str:
@@ -41,14 +66,21 @@ def release(root: Path, kind: str, date: str | None = None) -> str:
     if kind not in {"patch", "minor", "major"}:
         raise ValueError("release kind must be patch, minor, or major")
     release_date = calendar_date.fromisoformat(date) if date else calendar_date.today()
-    version_path = root / "jumpkut" / "__init__.py"
+    manifest_path = root / "Cargo.toml"
+    lock_path = root / "Cargo.lock"
     changelog_path = root / "CHANGELOG.md"
-    source = version_path.read_text(encoding="utf-8")
+    manifest = manifest_path.read_text(encoding="utf-8")
+    lock = lock_path.read_text(encoding="utf-8")
     changelog = changelog_path.read_text(encoding="utf-8")
-    assignment = re.search(rf'(?m)^__version__ = "({VERSION})"$', source)
-    if assignment is None or len(re.findall(r"(?m)^__version__\s*=", source)) != 1:
-        raise ValueError("jumpkut/__init__.py must contain one numeric X.Y.Z version")
+    name = re.search(r'(?ms)^\[package\][ \t]*\n.*?^name[ \t]*=[ \t]*"([^"]+)"', manifest)
+    if name is None:
+        raise ValueError("Cargo.toml [package] must have a name")
+    assignment = package_version(manifest)
     current = assignment.group(1)
+    locked = list(re.finditer(
+        rf'(?m)^name = "{re.escape(name.group(1))}"\nversion = "({VERSION})"$', lock))
+    if len(locked) != 1 or locked[0].group(1) != current:
+        raise ValueError("Cargo.lock must list the package once, at the Cargo.toml version")
     headings = re.findall(rf"(?m)^## \[({VERSION})\](?: - \d{{4}}-\d{{2}}-\d{{2}})?[ \t]*$", changelog)
     released = [heading[0] for heading in headings]
     if len(released) != len(set(released)) or current not in released:
@@ -70,14 +102,19 @@ def release(root: Path, kind: str, date: str | None = None) -> str:
     version = ".".join(map(str, parts))
     if version in released:
         raise ValueError(f"CHANGELOG.md already contains release {version}")
-    new_source = source[:assignment.start(1)] + version + source[assignment.end(1):]
+    new_manifest = manifest[:assignment.start(1)] + version + manifest[assignment.end(1):]
+    new_lock = lock[:locked[0].start(1)] + version + lock[locked[0].end(1):]
     new_changelog = (changelog[:start] + f"\n\n## [{version}] - {release_date.isoformat()}\n\n"
                      + notes + "\n\n" + changelog[end:].lstrip("\n"))
-    _write_atomic(changelog_path, new_changelog)
+    written = []
     try:
-        _write_atomic(version_path, new_source, invalidate_bytecode=True)
+        for path, text in ((changelog_path, new_changelog), (manifest_path, new_manifest), (lock_path, new_lock)):
+            _write_atomic(path, text)
+            written.append(path)
     except OSError:
-        _write_atomic(changelog_path, changelog)
+        originals = {changelog_path: changelog, manifest_path: manifest, lock_path: lock}
+        for path in written:
+            _write_atomic(path, originals[path])
         raise
     return version
 

@@ -1,0 +1,5 @@
+# Pinned toolchain for reproducible builds and CI (rustup installs it on demand).
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

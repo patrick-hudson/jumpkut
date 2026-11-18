@@ -1,0 +1,230 @@
+// Breeze-like tokens, filled from ~/.config/kdeglobals by Rust.
+export global Theme {
+    in-out property <bool> dark: true;
+    in-out property <color> accent: #3daee9;
+    in-out property <color> on-accent: #fcfcfc;
+    in-out property <color> window-bg: #202326;
+    in-out property <color> view-bg: #141618;
+    in-out property <color> fg: #fcfcfc;
+    in-out property <color> muted: #a1a9b1;
+    in-out property <string> font-family;
+    in-out property <length> font-size: 13.33px;
+    out property <color> border: dark ? #ffffff24 : #00000033;
+    out property <color> separator: dark ? #ffffff14 : #0000001a;
+    out property <color> button-bg: dark ? #ffffff0d : #ffffffcc;
+    out property <color> hover: accent.with-alpha(0.14);
+    out property <color> selection: accent.with-alpha(dark ? 0.32 : 0.24);
+}
+
+export component KButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> enabled: true;
+    callback clicked();
+    min-height: 30px;
+    min-width: max(84px, label.preferred-width + 28px);
+    horizontal-stretch: 0;
+    border-radius: 5px;
+    opacity: enabled ? 1 : 0.45;
+    background: primary ? (ta.pressed ? Theme.accent.darker(20%) : Theme.accent) : (ta.pressed ? Theme.selection : ta.has-hover ? Theme.hover : Theme.button-bg);
+    border-width: 1px;
+    border-color: ta.has-hover && enabled ? Theme.accent : (primary ? Theme.accent : Theme.border);
+    label := Text {
+        text: root.text;
+        color: root.primary ? Theme.on-accent : Theme.fg;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+    // Keyboard: Tab focuses, Space or Return activates. Clicks don't focus.
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    Rectangle {
+        visible: fs.has-focus;
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+    }
+}
+
+export component KCheck inherits Rectangle {
+    in-out property <bool> checked;
+    in property <string> text;
+    in property <string> tooltip;
+    callback toggled(bool);
+    min-height: 24px;
+    HorizontalLayout {
+        spacing: 9px;
+        VerticalLayout {
+            alignment: center;
+            box := Rectangle {
+                width: 17px;
+                height: 17px;
+                border-radius: 3px;
+                border-width: 1px;
+                border-color: root.checked || ta.has-hover ? Theme.accent : Theme.border;
+                background: root.checked ? Theme.accent : Theme.view-bg;
+                Path {
+                    visible: root.checked;
+                    width: 11px;
+                    height: 9px;
+                    commands: "M 1 4.5 L 4 7.5 L 10 1";
+                    stroke: Theme.on-accent;
+                    stroke-width: 2px;
+                }
+                Rectangle {
+                    visible: fs.has-focus;
+                    x: -3px;
+                    y: -3px;
+                    width: parent.width + 6px;
+                    height: parent.height + 6px;
+                    border-radius: 6px;
+                    border-width: 2px;
+                    border-color: Theme.accent;
+                }
+            }
+        }
+        Text {
+            text: root.text;
+            color: Theme.fg;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.toggle();
+        }
+    }
+    // Keyboard: Tab focuses, Space toggles (Return reaches the window: Save). Clicks don't focus.
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if (event.text == Key.Space) {
+                root.toggle();
+                return accept;
+            }
+            reject
+        }
+    }
+    function toggle() {
+        root.checked = !root.checked;
+        root.toggled(root.checked);
+    }
+}
+
+export component KLineEdit inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <bool> read-only;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+    callback accepted();
+    callback key(KeyEvent) -> EventResult;
+    height: 34px;
+    vertical-stretch: 0;
+    border-radius: 5px;
+    background: Theme.view-bg;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.border;
+    public function grab-focus() {
+        input.focus();
+    }
+    Text {
+        x: 10px;
+        width: parent.width - 20px;
+        text: root.placeholder;
+        visible: input.text == "";
+        color: Theme.muted;
+        vertical-alignment: center;
+    }
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        color: Theme.fg;
+        read-only: root.read-only;
+        vertical-alignment: center;
+        selection-background-color: Theme.selection;
+        selection-foreground-color: Theme.fg;
+        edited => {
+            root.edited(self.text);
+        }
+        accepted => {
+            root.accepted();
+        }
+    }
+}
+
+export component KSpin inherits Rectangle {
+    in-out property <int> value: 1;
+    in property <int> minimum: 1;
+    in property <int> maximum: 10000;
+    in property <bool> enabled: true;
+    min-height: 30px;
+    min-width: 120px;
+    border-radius: 5px;
+    background: Theme.view-bg;
+    border-width: 1px;
+    border-color: field.has-focus ? Theme.accent : Theme.border;
+    opacity: enabled ? 1 : 0.45;
+    function set(v: int) {
+        root.value = max(root.minimum, min(root.maximum, v));
+        field.text = root.value;
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        field := TextInput {
+            text: root.value;
+            enabled: root.enabled;
+            color: Theme.fg;
+            vertical-alignment: center;
+            input-type: number;
+            edited => {
+                if (self.text.is-float()) {
+                    root.value = max(root.minimum, min(root.maximum, self.text.to-float()));
+                }
+            }
+        }
+        for step[i] in [-1, 1]: Rectangle {
+            width: 28px;
+            background: sta.has-hover ? Theme.hover : transparent;
+            border-radius: 4px;
+            Text {
+                text: step < 0 ? "−" : "+";
+                color: Theme.fg;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            sta := TouchArea {
+                enabled: root.enabled;
+                clicked => {
+                    root.set(root.value + step);
+                }
+            }
+        }
+    }
+}
+
+export component KSeparator inherits Rectangle {
+    height: 1px;
+    background: Theme.separator;
+}

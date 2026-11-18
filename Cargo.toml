@@ -1,0 +1,51 @@
+[package]
+name = "jumpkut"
+# The application version (single source of truth; scripts/release.py bumps it).
+version = "0.8.2"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT"
+publish = false
+description = "Keyboard-first clipboard manager for Linux"
+repository = "https://github.com/patrick-hudson/jumpkut"
+
+# Every crate is pinned exactly. Versions match the ones Slint/winit already
+# pull in, so nothing is compiled twice.
+[dependencies]
+slint = { version = "=1.18.1", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-software",
+    "unstable-winit-030",
+    "raw-window-handle-06",
+] }
+zbus = { version = "=5.19.0", default-features = false, features = ["blocking-api", "async-io"] }
+x11rb = { version = "=0.13.2", features = ["xtest", "randr"] }
+wayland-client = "=0.31.15"
+wayland-backend = { version = "=0.3.17", features = ["client_system", "dlopen"] }
+wayland-protocols = { version = "=0.32.13", features = ["client", "staging"] }
+wayland-protocols-plasma = { version = "=0.3.12", features = ["client"] }
+arboard = { version = "=3.7.0", default-features = false }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+libc = "=0.2.191"
+ksni = { version = "=0.3.7", default-features = false, features = ["async-io", "blocking"] }
+xkbcommon-dl = "=0.4.2"
+# Already built for winit/xkbcommon-dl; maps characters to legacy X11 keysyms.
+xkeysym = "=0.2.1"
+# Already used by Slint for SVG; rasterises the tray icon.
+resvg = { version = "=0.48.1", default-features = false }
+# Not used directly: turns on runtime loading of libfontconfig (used by
+# Slint's font stack), so building needs no fontconfig-devel package.
+fontique = { version = "=0.11.1", features = ["fontconfig-dlopen"] }
+
+[build-dependencies]
+slint-build = "=1.18.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
+panic = "abort"

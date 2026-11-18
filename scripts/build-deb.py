@@ -10,34 +10,33 @@ import shutil
 import subprocess
 import tempfile
 
-from package_common import HOMEPAGE, application_version, stage_payload
+from package_common import (DEB_DEPENDS, DEFAULT_BINARY, DESCRIPTION, HOMEPAGE, SUMMARY, WL_CLIPBOARD,
+                            application_version, glibc_requirement, require_binary, stage_payload)
 
 
-def build(output_dir: Path) -> Path:
+def build(output_dir: Path, binary: Path = DEFAULT_BINARY) -> Path:
     if not shutil.which("dpkg-deb"):
         raise RuntimeError("dpkg-deb is required (on Debian/Ubuntu: sudo apt install dpkg)")
     version = application_version()
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    target = output_dir / f"jumpkut_{version}_all.deb"
+    target = output_dir / f"jumpkut_{version}_amd64.deb"
     with tempfile.TemporaryDirectory(prefix="jumpkut-deb-") as temporary:
         staging = Path(temporary) / "package"
-        stage_payload(staging)
+        stage_payload(staging, binary)
         files = sorted(path for path in staging.rglob("*") if path.is_file())
         installed_size = (sum(path.stat().st_size for path in files) + 1023) // 1024
         control = staging / "DEBIAN"
         control.mkdir(mode=0o755)
         (control / "control").write_text(
-            f"Package: jumpkut\nVersion: {version}\nArchitecture: all\n"
+            f"Package: jumpkut\nVersion: {version}\nArchitecture: amd64\n"
             "Maintainer: Patrick Hudson <5728403+patrick-hudson@users.noreply.github.com>\n"
             "Section: utils\nPriority: optional\n"
             f"Installed-Size: {installed_size}\nHomepage: {HOMEPAGE}\n"
-            "Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, python3-xlib, librsvg2-common\n"
-            "Recommends: wl-clipboard (>= 2.3.0)\n"
-            "Description: Keyboard-first clipboard manager for Linux\n"
-            " Jumpkut keeps a local text clipboard archive, an Alt+C quick picker,\n"
-            " a system tray menu, a searchable history window, and JSON backups.\n"
-            " It runs on X11 sessions and on KDE Plasma Wayland (with wl-clipboard).\n",
+            f"Depends: libc6 (>= {glibc_requirement(require_binary(binary))}), {DEB_DEPENDS}\n"
+            f"Recommends: {WL_CLIPBOARD}\n"
+            f"Description: {SUMMARY}\n"
+            + "".join(f" {line}\n" for line in DESCRIPTION.splitlines()),
             encoding="utf-8")
         (control / "md5sums").write_text(
             "".join(f"{hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()}  {path.relative_to(staging).as_posix()}\n"
@@ -56,9 +55,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("dist"),
                         help="artifact directory (default: dist)")
+    parser.add_argument("--binary", type=Path, default=DEFAULT_BINARY,
+                        help="the built jumpkut binary (default: target/release/jumpkut)")
     options = parser.parse_args()
     try:
-        artifact = build(options.output_dir)
+        artifact = build(options.output_dir, options.binary)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Debian package build failed: {error}\n")
     print(artifact)
