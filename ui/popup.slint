@@ -1,0 +1,195 @@
+// The quick popup: one clipping at a time, Breeze-like, translucent.
+import { Theme } from "theme.slint";
+
+export component Popup inherits Window {
+    title: "Jumpkut — Clipboard history";
+    icon: @image-url("../assets/jumpkut.svg");
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    // The card plus a margin for its soft shadow.
+    width: 392px;
+    height: 262px;
+    default-font-family: Theme.font-family;
+    default-font-size: Theme.font-size;
+
+    in property <int> number: 1;
+    in property <int> count: 0;
+    in property <string> preview;
+    in property <string> age;
+    in property <string> summary;
+    in property <string> hint;
+    in property <bool> empty;
+    // The geometry Rust needs for the blur region (logical px).
+    out property <length> card-x: card.x;
+    out property <length> card-y: card.y;
+    out property <length> card-width: card.width;
+    out property <length> card-height: card.height;
+    out property <length> card-radius: card.border-radius;
+    // Reading this lays out the preview text (loads and shapes the font).
+    out property <length> text-warmup: preview-text.preferred-height;
+
+    // The shortcut's key as Slint reports it (e.g. "c").
+    in property <string> hotkey-char;
+    callback step(int);
+    callback first();
+    callback last();
+    callback choose();
+    callback dismiss();
+    callback remove();
+
+    forward-focus: scope;
+
+    scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.choose();
+                return accept;
+            }
+            if (event.text == Key.DownArrow || event.text == Key.RightArrow) {
+                root.step(1);
+                return accept;
+            }
+            if (event.text == Key.Tab) {
+                root.step(event.modifiers.shift ? -1 : 1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow || event.text == Key.LeftArrow || event.text == Key.Backtab) {
+                root.step(-1);
+                return accept;
+            }
+            if (event.text == Key.Home) {
+                root.first();
+                return accept;
+            }
+            if (event.text == Key.End) {
+                root.last();
+                return accept;
+            }
+            if (event.text == Key.Delete) {
+                root.remove();
+                return accept;
+            }
+            if (hotkey-char != "" && event.text.to-lowercase() == hotkey-char) {
+                root.step(event.modifiers.shift ? -1 : 1);
+                return accept;
+            }
+            reject
+        }
+
+        card := Rectangle {
+            x: 18px;
+            y: 14px;
+            width: root.width - 36px;
+            height: root.height - 36px;
+            border-radius: 12px;
+            background: Theme.window-bg.with-alpha(Theme.dark ? 0.78 : 0.82);
+            border-width: 1px;
+            border-color: Theme.dark ? #ffffff1c : #00000021;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: Theme.dark ? #00000070 : #0000002e;
+
+            TouchArea {
+                double-clicked => {
+                    root.choose();
+                }
+            }
+
+            VerticalLayout {
+                padding: 14px;
+                padding-top: 12px;
+                padding-bottom: 10px;
+                spacing: 9px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    height: 24px;
+
+                    Rectangle {
+                        horizontal-stretch: 0;
+                        min-width: 34px;
+                        border-radius: 6px;
+                        background: Theme.accent;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            Text {
+                                text: root.empty ? "0" : "#\{root.number}";
+                                color: Theme.on-accent;
+                                font-weight: 700;
+                                font-size: Theme.font-size * 1.08;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.empty ? "Clipboard history" : "\{root.age}  ·  \{root.summary}";
+                        color: Theme.muted;
+                        font-size: Theme.font-size * 0.92;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        horizontal-stretch: 0;
+                        text: root.empty ? "" : "\{root.number} of \{root.count}";
+                        color: Theme.muted;
+                        font-size: Theme.font-size * 0.92;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: 8px;
+                    background: Theme.view-bg.with-alpha(Theme.dark ? 0.55 : 0.7);
+                    border-width: 1px;
+                    border-color: Theme.accent.with-alpha(Theme.dark ? 0.55 : 0.6);
+                    clip: true;
+
+                    preview-text := Text {
+                        x: 12px;
+                        y: 9px;
+                        width: parent.width - 24px;
+                        height: parent.height - 18px;
+                        text: root.preview;
+                        color: root.empty ? Theme.muted : Theme.fg;
+                        wrap: word-wrap;
+                        overflow: elide;
+                        vertical-alignment: top;
+                        horizontal-alignment: root.empty ? center : left;
+                    }
+                }
+
+                Rectangle {
+                    height: 3px;
+                    border-radius: 1.5px;
+                    background: Theme.dark ? #ffffff14 : #0000000f;
+                    Rectangle {
+                        width: max(18px, parent.width / max(1, root.count));
+                        x: root.count > 1 ? (parent.width - self.width) * (root.number - 1) / (root.count - 1) : 0px;
+                        border-radius: 1.5px;
+                        background: Theme.accent;
+                        animate x { duration: 90ms; easing: ease-out; }
+                    }
+                }
+
+                Text {
+                    text: root.hint;
+                    color: Theme.muted;
+                    font-size: Theme.font-size * 0.85;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+}

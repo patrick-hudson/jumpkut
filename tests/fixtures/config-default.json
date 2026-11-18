@@ -1,0 +1,11 @@
+{
+  "hotkey": "<Alt>c",
+  "history_limit": 30,
+  "sticky": false,
+  "auto_paste": true,
+  "persist": true,
+  "tray_limit": 10,
+  "custom_quick_limit": false,
+  "custom_tray_limit": false,
+  "resume_last_selection": true
+}

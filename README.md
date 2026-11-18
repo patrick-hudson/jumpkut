@@ -5,10 +5,10 @@
 <p align="center">
   <a href="https://github.com/patrick-hudson/jumpkut/actions/workflows/tests.yml"><img src="https://github.com/patrick-hudson/jumpkut/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
   <a href="https://github.com/patrick-hudson/jumpkut/actions/workflows/packages.yml"><img src="https://github.com/patrick-hudson/jumpkut/actions/workflows/packages.yml/badge.svg?branch=main" alt="Linux packages"></a>
-  <a href="https://github.com/patrick-hudson/jumpkut/releases/latest"><img src="https://img.shields.io/github/v/release/patrick-hudson/jumpkut?color=7863cf" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7863cf" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/desktop-X11%20%7C%20KDE%20Wayland-7863cf" alt="X11 or KDE Plasma Wayland">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-7863cf" alt="Python 3.10 or newer">
+  <a href="https://github.com/patrick-hudson/jumpkut/releases/latest"><img src="https://img.shields.io/github/v/release/patrick-hudson/jumpkut?color=3d8fd6" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3d8fd6" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/desktop-X11%20%7C%20KDE%20Wayland-3d8fd6" alt="X11 or KDE Plasma Wayland">
+  <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20Slint-3d8fd6" alt="Built with Rust and Slint">
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-Jumpkut brings the quick, single-clipping picker of [Jumpcut](https://snark.github.io/jumpcut/) to Linux, with a scissors tray icon, a searchable history browser, and portable backups. It is a native GTK 3 app written in Python.
+Jumpkut brings the quick, single-clipping picker of [Jumpcut](https://snark.github.io/jumpcut/) to Linux, with a tray icon, a searchable history browser, and portable backups. It is a single native binary written in Rust with the [Slint](https://slint.dev) toolkit: no Python, GTK or Qt at run time.
 
 **Runs on X11 desktops and on KDE Plasma 6 Wayland** ([details](#kde-plasma-wayland)). Other Wayland desktops are not supported yet. Jumpkut records text, including Unicode and multiline content; images and files are not recorded.
 
@@ -48,12 +48,12 @@ Prefer to choose without holding a key? Enable **Keep history open until Enter**
 
 ## Screenshots
 
-These are real screenshots of Jumpkut **0.4.0**, using demo clippings.
+These are real screenshots of the Rust app (Jumpkut **0.8**) on KDE Plasma 6 (Breeze Dark), using demo clippings.
 
 <table>
   <tr>
     <td align="center" width="50%"><strong>Quick picker</strong><br><br><img src="docs/images/quick-picker.png" alt="Alt+C quick picker, showing the newest clipping numbered 1" width="340"></td>
-    <td align="center" width="50%"><strong>System tray</strong><br><br><img src="docs/images/tray-menu.png" alt="Tray menu with ten recent clippings and normal app options" width="370"></td>
+    <td align="center" width="50%"><strong>System tray</strong><br><br><img src="docs/images/tray-menu.png" alt="Tray menu with recent clippings and the app options" width="370"></td>
   </tr>
 </table>
 
@@ -63,7 +63,7 @@ These are real screenshots of Jumpkut **0.4.0**, using demo clippings.
 <table>
   <tr>
     <td align="center" width="50%"><strong>Preferences & backups</strong><br><br><img src="docs/images/preferences.png" alt="Preferences with Alt+C, independent default limits of 30 and 10, startup, and backup controls" width="350"></td>
-    <td align="center" width="50%"><strong>Version information</strong><br><br><img src="docs/images/about.png" alt="About Jumpkut showing version 0.4.0 and the scissors icon" width="420"></td>
+    <td align="center" width="50%"><strong>Version information</strong><br><br><img src="docs/images/about.png" alt="About Jumpkut showing the version and the Made with Slint credit" width="420"></td>
   </tr>
 </table>
 
@@ -73,16 +73,16 @@ Download an installer from **[the latest release](https://github.com/patrick-hud
 
 | Format | Use it on | What is included |
 |---|---|---|
-| **.deb** | Linux Mint, Ubuntu, Debian with Python 3.10+ | System-wide command, application-menu entry, and scissors icon; apt installs dependencies. |
-| **.rpm** | Fedora with Python 3.10+ | System-wide command, application-menu entry, and scissors icon; dnf installs dependencies. |
-| **.AppImage** | x86_64 Linux with glibc 2.35+ | Portable bundle containing Python, GTK, and the application's dependencies. |
+| **.deb** | Linux Mint, Ubuntu 22.04+, Debian 12+ (x86_64) | System-wide command, application-menu entry, and icon; apt installs the few system libraries it uses. |
+| **.rpm** | Fedora (x86_64) | System-wide command, application-menu entry, and icon; dnf installs the few system libraries it uses. |
+| **.AppImage** | x86_64 Linux with glibc 2.35+ | The single Jumpkut binary; graphics, Wayland/X11 and font libraries come from your system. |
 
 ### Debian, Ubuntu & Linux Mint
 
 From the directory containing your downloaded `.deb`:
 
 ```sh
-sudo apt install ./jumpkut_*_all.deb
+sudo apt install ./jumpkut_*_amd64.deb
 jumpkut
 ```
 
@@ -91,7 +91,7 @@ jumpkut
 From the directory containing your downloaded `.rpm`:
 
 ```sh
-sudo dnf install ./jumpkut-*.noarch.rpm
+sudo dnf install ./jumpkut-*.x86_64.rpm
 jumpkut
 ```
 
@@ -118,27 +118,26 @@ Release downloads include **SHA256SUMS**. Put it beside the downloaded packages 
 
 ### KDE Plasma Wayland
 
-On Plasma 6 Wayland (for example Fedora KDE), Jumpkut runs its windows and tray icon through XWayland and uses KDE session services for the parts Wayland keeps private:
+On Plasma 6 Wayland (for example Fedora KDE), Jumpkut is a native Wayland app and uses KDE session services for the parts Wayland keeps private:
 
 - **Shortcut** — Alt+C is registered with KDE's global shortcut service. It also appears in **System Settings → Keyboard → Shortcuts → Jumpkut**; change it in Jumpkut's Preferences.
-- **Clipboard** — `wl-paste --watch` records copies from every app, and `wl-copy` sets the chosen clipping. It needs wl-clipboard 2.3 or newer (`sudo dnf install wl-clipboard`). Copies that carry the KDE password-manager hint (`x-kde-passwordManagerHint`, set by KeePassXC and similar apps) are skipped; other password copies are recorded like any text.
-- **Paste automatically** — KDE asks once for permission to type the paste shortcut (*Remote control requested*). Allow it and keep **Allow restoring on future sessions** checked. Afterwards KDE shows a short *exercising remote control privileges* notice once each time Jumpkut starts (usually once per sign-in); turning **Paste automatically** off avoids it. If you decline, Jumpkut still copies the clipping and you paste it yourself: Ctrl+V, or Ctrl+Shift+V (or your terminal's paste shortcut) in terminals such as Konsole and Ghostty. To ask again, turn **Paste automatically** off and on in Preferences.
-
-python-xlib is only needed for X11 sessions.
+- **Clipboard** — `wl-paste --watch` records copies from every app, and `wl-copy` sets the chosen clipping. It needs **wl-clipboard 2.3 or newer** (`sudo dnf install wl-clipboard`). Copies that carry the KDE password-manager hint (`x-kde-passwordManagerHint`, set by KeePassXC and similar apps) are skipped; other password copies are recorded like any text.
+- **Popup** — appears instantly, without KWin's window-open animation, with KDE's blur behind it and your accent colour.
+- **Paste automatically** — types Ctrl+V (Ctrl+Shift+V in terminals such as Konsole and Ghostty) through KWin's own input protocol. There is **no permission prompt and no remote-control notice**. If KWin does not offer that protocol (older Plasma), Jumpkut uses a `/dev/uinput` keyboard when your account may write to it, and only then the RemoteDesktop portal, which asks once. See [packaging notes](docs/packaging.md#uinput-fallback). If you turn **Paste automatically** off, Jumpkut copies the clipping and you paste it yourself.
 
 ### Install from source
 
-On Linux Mint, Ubuntu, or Debian, install the system dependencies, then clone and install Jumpkut for your user:
+Jumpkut builds with Rust (stable, installed for your user with [rustup](https://rustup.rs)); no system `-devel` packages are needed. The exact toolchain version is pinned in `rust-toolchain.toml` and installed automatically.
 
 ```sh
-sudo apt install git python3-gi gir1.2-gtk-3.0 python3-xlib librsvg2-common
+curl https://sh.rustup.rs -sSf | sh        # once, if cargo is not installed
 git clone https://github.com/patrick-hudson/jumpkut.git
 cd jumpkut
 ./install.py
 jumpkut
 ```
 
-Python **3.10 or newer** is required. Only the dependency installation needs `sudo`; run the Jumpkut installer as your normal user.
+On KDE Plasma Wayland, also install wl-clipboard 2.3 or newer. Run the installer as your normal user; it never needs `sudo`.
 
 Plain `jumpkut` starts in the **background** and returns immediately. The app stays in the tray after you close the terminal. You can also open **Jumpkut** from your desktop's application menu to show Full History.
 
@@ -150,21 +149,20 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Add that line to your shell's startup file to keep it across terminals. Enable **Run at startup** in Preferences to start Jumpkut when you sign in.
 
-Linux Mint Cinnamon supports the tray protocol Jumpkut uses. Other desktops need support for legacy tray icons; GNOME may need a tray extension.
+KDE Plasma and Linux Mint Cinnamon support the tray protocol Jumpkut uses (StatusNotifierItem). GNOME needs a tray extension such as AppIndicator.
 
 <details>
 <summary><strong>Installation paths and running from source</strong></summary>
 
-The installer creates:
+The installer builds `target/release/jumpkut` with cargo and creates:
 
 | Item | Location |
 |---|---|
-| Command | `~/.local/bin/jumpkut` |
-| Application | `~/.local/share/jumpkut/app/` |
+| Command (the binary) | `~/.local/bin/jumpkut` |
 | App-menu entry | `~/.local/share/applications/jumpkut.desktop` |
-| Scissors icon | `~/.local/share/icons/hicolor/scalable/apps/jumpkut.svg` |
+| Icon | `~/.local/share/icons/hicolor/scalable/apps/jumpkut.svg` |
 
-Use `./install.py --prefix /some/directory` for a custom installation base. You can run from a source checkout with `./run.py` without installing the launcher.
+Use `./install.py --prefix /some/directory` for a custom installation base, or `--binary FILE` to install an already-built binary. You can run from a source checkout with `cargo run --release -- --daemon` without installing.
 
 </details>
 
@@ -186,7 +184,7 @@ Automatic paste uses Ctrl+V, or Ctrl+Shift+V for recognized terminal windows. Yo
 
 ## Preferences
 
-Click the scissors tray icon and choose **Preferences**.
+Click the Jumpkut tray icon and choose **Preferences**.
 
 | Setting | Default | Customize it |
 |---|---|---|
@@ -247,31 +245,28 @@ From your source checkout:
 
 ```sh
 git pull --ff-only
-./install.py
 jumpkut --quit
+./install.py
 jumpkut
 ```
 
-Reinstalling preserves saved history, preferences, and backups. Restart a running instance after updating so it loads the new code. Standard installs persist history to disk; if you disabled persistence in the configuration file, back up the in-memory history before quitting.
+Reinstalling preserves saved history, preferences, and backups. Quit the running instance before updating so the new binary starts afterwards. Standard installs persist history to disk; if you disabled persistence in the configuration file, back up the in-memory history before quitting.
+
+**Coming from the Python version (0.7.1 and earlier)?** The Rust app reads and writes the same history, preferences, and backups, so nothing needs converting. Quit the Python app first: the Rust app refuses to start while it runs, so the two never write the same history. `./install.py` replaces the old `~/.local/share/jumpkut/app/` directory and launcher, and points an existing **Run at startup** entry at the new binary; packaged installs update that entry the first time the new version starts.
 
 Older preferences using the previous default of 200 move to the new 30/10 defaults. A saved quick length of 30 uses the unchecked default; other custom quick lengths stay enabled. Entries removed by an older release can be recovered only from a backup containing them.
 
 ## Development
 
-Use the system Python so GTK and PyGObject are available:
-
 ```sh
-/usr/bin/python3 -m unittest discover -s tests -v
+cargo build --release            # target/release/jumpkut
+cargo test --release             # data-format compatibility, backup merge, selection logic
+cargo clippy --all-targets -- -D warnings
+/usr/bin/python3 -m unittest discover -s tests -v   # installer, release, packaging
+./scripts/smoke-test.sh          # start, forward and quit on a private Xvfb display
 ```
 
-Run the native desktop integration tests separately:
-
-```sh
-sudo apt install xvfb metacity dbus-x11
-./scripts/test-desktop.sh
-```
-
-The native runner uses a disposable X11 display, a private session bus, and temporary history and preferences. It does not use your live clipboard. GitHub Actions runs both suites.
+The smoke test uses a disposable X11 display, a private session bus, and temporary history and preferences. It does not use your live clipboard. GitHub Actions runs all of these.
 
 The **[Linux packages workflow](https://github.com/patrick-hudson/jumpkut/actions/workflows/packages.yml)** builds all three packages on pushes and pull requests; you can also run it manually. CI tests the native package and AppImage after packaging, then saves the files as an Actions artifact. Pushing a matching `vX.Y.Z` tag publishes the tested installers and checksums as a GitHub release.
 
@@ -279,4 +274,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for development and releases, [CHANGELOG
 
 ## License & credits
 
-[MIT](LICENSE). Inspired by [Jumpcut](https://snark.github.io/jumpcut/) for macOS. Jumpkut is an independent project and uses its own GTK interface, clipboard implementation, and scissors artwork.
+[MIT](LICENSE). Inspired by [Jumpcut](https://snark.github.io/jumpcut/) for macOS. Jumpkut is an independent project with its own interface, clipboard implementation, and artwork.
+
+The interface is built with [Slint](https://slint.dev), used under the Slint Royalty-free Desktop, Mobile, and Web Applications License; the About window shows the required “Made with Slint” attribution.

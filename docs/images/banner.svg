@@ -3,30 +3,55 @@
   <desc id="description">Your clipboard, a shortcut away. A native clipboard manager for Linux and X11.</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#201a35"/>
-      <stop offset="1" stop-color="#33254f"/>
+      <stop offset="0" stop-color="#132036"/>
+      <stop offset="1" stop-color="#1d3556"/>
     </linearGradient>
     <clipPath id="edge"><rect width="1280" height="370" rx="24"/></clipPath>
   </defs>
   <g clip-path="url(#edge)">
     <rect width="1280" height="370" fill="url(#background)"/>
-    <circle cx="1180" cy="28" r="205" fill="#7863cf" opacity="0.11"/>
-    <circle cx="1180" cy="28" r="140" fill="none" stroke="#a28de8" stroke-width="1.5" opacity="0.23"/>
-    <circle cx="1180" cy="28" r="270" fill="none" stroke="#a28de8" stroke-width="1.5" opacity="0.14"/>
-    <circle cx="90" cy="385" r="155" fill="#7863cf" opacity="0.09"/>
+    <circle cx="1180" cy="28" r="205" fill="#3d8fd6" opacity="0.11"/>
+    <circle cx="1180" cy="28" r="140" fill="none" stroke="#7cc0f2" stroke-width="1.5" opacity="0.23"/>
+    <circle cx="1180" cy="28" r="270" fill="none" stroke="#7cc0f2" stroke-width="1.5" opacity="0.14"/>
+    <circle cx="90" cy="385" r="155" fill="#3d8fd6" opacity="0.09"/>
   </g>
-  <g transform="translate(114 85) scale(4.4)">
-    <rect x="1" y="1" width="30" height="30" rx="8" fill="#7863cf"/>
-    <g fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="10" cy="23" r="3.2"/><circle cx="22" cy="23" r="3.2"/>
-      <path d="M12 20.5 23.5 7.5M20 20.5 8.5 7.5"/>
-    </g>
+  <g transform="translate(108 80) scale(0.6)"><g transform="translate(12 0)">
+  <defs>
+    <linearGradient id="back" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#3a6ea8"/><stop offset="1" stop-color="#1b3a63"/>
+    </linearGradient>
+    <linearGradient id="middle" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#7cc0f2"/><stop offset="0.55" stop-color="#3d8fd6"/><stop offset="1" stop-color="#245d9c"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="0.6" stop-color="#eef3f8"/><stop offset="1" stop-color="#c9d6e4"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffb547"/><stop offset="1" stop-color="#f27d2a"/>
+    </linearGradient>
+  </defs>
+  <g transform="rotate(-30 128 192)">
+    <rect x="78" y="43" width="110" height="162" rx="10" fill="#10243e" opacity=".55"/>
+    <rect x="78" y="39" width="110" height="162" rx="10" fill="url(#back)"/>
   </g>
+  <g transform="rotate(-10 128 192)">
+    <rect x="78" y="43" width="110" height="162" rx="10" fill="#10243e" opacity=".55"/>
+    <rect x="78" y="39" width="110" height="162" rx="10" fill="url(#middle)"/>
+    <path d="M90 40.5 H176 Q186.5 40.5 186.5 51" stroke="#fff" stroke-opacity=".5" fill="none" stroke-width="2"/>
+  </g>
+  <g transform="rotate(14 128 192)">
+    <rect x="78" y="45" width="110" height="162" rx="10" fill="#10243e" opacity=".45"/>
+    <rect x="78" y="39" width="110" height="162" rx="10" fill="url(#paper)"/>
+    <rect x="96" y="66" width="74" height="18" rx="9" fill="url(#mark)"/>
+    <rect x="96" y="98" width="62" height="10" rx="5" fill="#9fb3c8"/>
+    <rect x="96" y="120" width="48" height="10" rx="5" fill="#b8c7d6"/>
+  </g>
+</g></g>
   <text x="294" y="170" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="88" font-weight="700" letter-spacing="-3">Jumpkut</text>
-  <text x="299" y="225" fill="#d7cdef" font-family="DejaVu Sans, sans-serif" font-size="28">Your clipboard, a shortcut away.</text>
-  <rect x="300" y="268" width="147" height="35" rx="17.5" fill="#7863cf" opacity="0.38"/>
-  <text x="373.5" y="291" text-anchor="middle" fill="#f2edff" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700" letter-spacing="1">LINUX / X11</text>
-  <rect x="459" y="268" width="110" height="35" rx="17.5" fill="#7863cf" opacity="0.38"/>
-  <text x="514" y="291" text-anchor="middle" fill="#f2edff" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700" letter-spacing="1">ALT + C</text>
-  <text x="590" y="291" fill="#bcaedb" font-family="DejaVu Sans, sans-serif" font-size="16">Copy. Browse. Paste.</text>
+  <text x="299" y="225" fill="#cfe0f2" font-family="DejaVu Sans, sans-serif" font-size="28">Your clipboard, a shortcut away.</text>
+  <rect x="300" y="268" width="147" height="35" rx="17.5" fill="#3d8fd6" opacity="0.38"/>
+  <text x="373.5" y="291" text-anchor="middle" fill="#eef5fd" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700" letter-spacing="1">LINUX / X11</text>
+  <rect x="459" y="268" width="110" height="35" rx="17.5" fill="#3d8fd6" opacity="0.38"/>
+  <text x="514" y="291" text-anchor="middle" fill="#eef5fd" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700" letter-spacing="1">ALT + C</text>
+  <text x="590" y="291" fill="#a9c3dc" font-family="DejaVu Sans, sans-serif" font-size="16">Copy. Browse. Paste.</text>
 </svg>

@@ -1,9 +1,11 @@
+# Rust build output
+target/
+# Python tooling caches
 __pycache__/
 *.py[cod]
 .venv/
 dist/
 build/
-*.egg-info/
 .DS_Store
 .coverage
 htmlcov/
@@ -13,3 +15,4 @@ htmlcov/
 # Local capture artifacts; the public gallery is in docs/images/.
 docs/screenshots/
 docs/share/
+

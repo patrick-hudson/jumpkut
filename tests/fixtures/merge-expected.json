@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "clips": [
+    {
+      "id": "a1",
+      "text": "shared text",
+      "created_at": 150.0
+    },
+    {
+      "id": "regenerated",
+      "text": "foreign with colliding id",
+      "created_at": 120.0
+    },
+    {
+      "id": "a2",
+      "text": "only local",
+      "created_at": 90.0
+    },
+    {
+      "id": "dup",
+      "text": "local dup id",
+      "created_at": 80.0
+    },
+    {
+      "id": "b3",
+      "text": "only backup",
+      "created_at": 50.0
+    }
+  ]
+}
