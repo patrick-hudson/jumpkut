@@ -186,6 +186,9 @@ struct PasteJob {
     report: bool,
     /// Asked KWin again to activate `target` after focus went elsewhere.
     reactivated: bool,
+    /// The window active when the job started (the closing popup): KWin
+    /// reports the change of focus asynchronously.
+    closing: Option<String>,
 }
 
 pub struct App {
@@ -970,6 +973,12 @@ impl App {
                     }
                     _ => None,
                 };
+                let closing = self
+                    .kde
+                    .as_ref()
+                    .and_then(Kde::active)
+                    .map(|w| w.id)
+                    .filter(|id| Some(id) != target.as_ref());
                 self.paste_generation += 1;
                 let generation = self.paste_generation;
                 self.paste_job = Some(PasteJob {
@@ -978,6 +987,7 @@ impl App {
                     deadline: Instant::now() + Duration::from_millis(1500),
                     report: false,
                     reactivated: false,
+                    closing,
                 });
                 self.paste_timer.start(
                     slint::TimerMode::Repeated,
@@ -1041,7 +1051,7 @@ impl App {
         let Some(active) = self.kde.as_ref().and_then(Kde::active) else {
             return;
         };
-        if active.pid == std::process::id().to_string() {
+        if job.closing.as_ref() == Some(&active.id) {
             return; // KWin returns focus asynchronously after the popup hides
         }
         if active.id != target {
@@ -1059,6 +1069,9 @@ impl App {
                 kde.activate(&target);
             }
             return;
+        }
+        if active.pid == std::process::id().to_string() {
+            return; // never paste into Jumpkut itself
         }
         let terminal = x11::is_terminal_class(&active.class);
         if debug() {
