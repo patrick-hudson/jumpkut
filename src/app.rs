@@ -186,9 +186,6 @@ struct PasteJob {
     report: bool,
     /// Asked KWin again to activate `target` after focus went elsewhere.
     reactivated: bool,
-    /// The window active when the job started (the closing popup): KWin
-    /// reports the change of focus asynchronously.
-    closing: Option<String>,
 }
 
 pub struct App {
@@ -973,12 +970,6 @@ impl App {
                     }
                     _ => None,
                 };
-                let closing = self
-                    .kde
-                    .as_ref()
-                    .and_then(Kde::active)
-                    .map(|w| w.id)
-                    .filter(|id| Some(id) != target.as_ref());
                 self.paste_generation += 1;
                 let generation = self.paste_generation;
                 self.paste_job = Some(PasteJob {
@@ -987,7 +978,6 @@ impl App {
                     deadline: Instant::now() + Duration::from_millis(1500),
                     report: false,
                     reactivated: false,
-                    closing,
                 });
                 self.paste_timer.start(
                     slint::TimerMode::Repeated,
@@ -1051,7 +1041,7 @@ impl App {
         let Some(active) = self.kde.as_ref().and_then(Kde::active) else {
             return;
         };
-        if job.closing.as_ref() == Some(&active.id) {
+        if active.popup {
             return; // KWin returns focus asynchronously after the popup hides
         }
         if active.id != target {
