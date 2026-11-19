@@ -50,7 +50,8 @@ function report(w) {
            w ? String(w.internalId) : "",
            w ? String(w.resourceClass || "") : "",
            w && w.windowId ? String(w.windowId) : "",
-           w ? String(w.pid || 0) : "0");
+           w ? String(w.pid || 0) : "0",
+           !!w && String(w.resourceClass) === APP && String(w.caption) === TITLE);
 }
 function setup(w) {
   if (!w || String(w.resourceClass) !== APP || String(w.caption) !== TITLE) return;
@@ -90,6 +91,8 @@ pub struct WindowInfo {
     pub id: String,
     pub class: String,
     pub pid: String,
+    /// Jumpkut's quick popup (matched by app id and title in KWin).
+    pub popup: bool,
 }
 
 #[derive(Default)]
@@ -111,6 +114,7 @@ impl WindowsObject {
         class: String,
         _x11: String,
         pid: String,
+        popup: bool,
     ) -> zbus::fdo::Result<()> {
         let mut state = self.0.lock().unwrap();
         // Only KWin may report windows.
@@ -130,7 +134,12 @@ impl WindowsObject {
             if std::env::var_os("JUMPKUT_DEBUG").is_some() {
                 eprintln!("Jumpkut: active window {id} class {class:?}");
             }
-            state.active = Some(WindowInfo { id, class, pid });
+            state.active = Some(WindowInfo {
+                id,
+                class,
+                pid,
+                popup,
+            });
         }
         Ok(())
     }

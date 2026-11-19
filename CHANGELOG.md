@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-19
+
+### Fixed
+
+- KDE Wayland: Paste automatically works again when KWin gives focus to another window as the popup closes (for example a window on another screen). Jumpkut now returns focus to the window you came from before pasting, and says so if it cannot instead of silently not pasting.
+
 ## [0.8.2] - 2026-11-17
 
 ### Fixed
