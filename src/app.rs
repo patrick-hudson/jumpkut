@@ -184,6 +184,8 @@ struct PasteJob {
     deadline: Instant,
     /// Show the outcome in Full History's status line.
     report: bool,
+    /// Asked KWin again to activate `target` after focus went elsewhere.
+    reactivated: bool,
 }
 
 pub struct App {
@@ -864,7 +866,9 @@ impl App {
             .picker
             .accept()
             .and_then(|i| self.popup_clips.get(i).cloned());
-        self.hide_popup(selected.is_none());
+        // Restore focus explicitly: when the popup closes, KWin may activate
+        // another window (e.g. one on a different screen) instead.
+        self.hide_popup(true);
         if let Some(clip) = selected {
             let target = self.previous.clone();
             self.select_clip(&clip, target);
@@ -973,6 +977,7 @@ impl App {
                     target,
                     deadline: Instant::now() + Duration::from_millis(1500),
                     report: false,
+                    reactivated: false,
                 });
                 self.paste_timer.start(
                     slint::TimerMode::Repeated,
@@ -1016,23 +1021,44 @@ impl App {
             app.paste_job = None;
             app.paste_timer.stop();
         };
+        if Instant::now() > job.deadline {
+            if job.target.is_some() && self.publisher.state == Publish::Done {
+                eprintln!("Jumpkut: focus did not return to the previous window; not pasting");
+                self.notify("Could not paste: focus did not return to the window you came from. The clipping was copied; paste it with Ctrl+V.");
+            }
+            return done(self);
+        }
         // Idle: another copy replaced ours before the paste.
-        if Instant::now() > job.deadline
-            || matches!(self.publisher.state, Publish::Failed | Publish::Idle)
-        {
+        if matches!(self.publisher.state, Publish::Failed | Publish::Idle) {
             return done(self);
         }
         if self.publisher.state != Publish::Done {
             return;
         }
-        let Some(target) = &job.target else {
+        let Some(target) = job.target.clone() else {
             return done(self); // published; nothing to paste into
         };
         let Some(active) = self.kde.as_ref().and_then(Kde::active) else {
             return;
         };
-        if &active.id != target || active.pid == std::process::id().to_string() {
+        if active.pid == std::process::id().to_string() {
             return; // KWin returns focus asynchronously after the popup hides
+        }
+        if active.id != target {
+            // KWin activated another window when the popup closed: ask once more.
+            if let Some(job) = self.paste_job.as_mut()
+                && !std::mem::replace(&mut job.reactivated, true)
+                && let Some(kde) = &self.kde
+            {
+                if debug() {
+                    eprintln!(
+                        "Jumpkut: focus went to {:?}; reactivating the target",
+                        active.class
+                    );
+                }
+                kde.activate(&target);
+            }
+            return;
         }
         let terminal = x11::is_terminal_class(&active.class);
         if debug() {
