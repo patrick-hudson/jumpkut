@@ -922,9 +922,15 @@ impl Watcher {
         match self.read(target) {
             Some((kind, bytes)) if kind == u32::from(AtomEnum::STRING) => {
                 // STRING is Latin-1.
-                ClipboardChange::Text(bytes.iter().map(|b| *b as char).collect())
+                ClipboardChange::Text(
+                    bytes
+                        .iter()
+                        .filter(|&&b| b != 0)
+                        .map(|&b| b as char)
+                        .collect(),
+                )
             }
-            Some((_, bytes)) => ClipboardChange::Text(String::from_utf8_lossy(&bytes).into_owned()),
+            Some((_, bytes)) => ClipboardChange::Text(crate::history::clipboard_text(&bytes)),
             None => ClipboardChange::Nothing,
         }
     }

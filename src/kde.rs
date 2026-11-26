@@ -466,10 +466,7 @@ pub fn parse_watch_line(line: &str) -> (String, Option<String>) {
         return (state.to_owned(), None);
     }
     match base64_decode(payload.trim_end()) {
-        Some(bytes) => (
-            "data".into(),
-            Some(String::from_utf8_lossy(&bytes).into_owned()),
-        ),
+        Some(bytes) => ("data".into(), Some(crate::history::clipboard_text(&bytes))),
         None => ("invalid".into(), None),
     }
 }

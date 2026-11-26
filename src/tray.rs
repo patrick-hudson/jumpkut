@@ -31,9 +31,10 @@ pub struct JumpkutTray {
     pub on_action: Arc<dyn Fn(Action) + Send + Sync>,
 }
 
-/// DBusMenu treats `_` as a mnemonic marker.
+/// DBusMenu treats `_` as a mnemonic marker. A NUL would make the bus
+/// disconnect the tray for good, so none may reach it.
 fn label(text: &str) -> String {
-    text.replace('_', "__")
+    text.replace('\0', "").replace('_', "__")
 }
 
 impl JumpkutTray {
