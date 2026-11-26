@@ -42,6 +42,54 @@ pub fn new_id() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// Clipboard bytes as text. Normally UTF-8, but some apps hand over UTF-16
+/// (with or without a byte-order mark) for a plain-text request. NULs are
+/// dropped: D-Bus (the tray menu) and C APIs cannot carry them.
+pub fn clipboard_text(bytes: &[u8]) -> String {
+    if !bytes.contains(&0) && !bytes.starts_with(&[0xff, 0xfe]) && !bytes.starts_with(&[0xfe, 0xff])
+    {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    let utf16 = |little: bool, bytes: &[u8]| -> String {
+        let units = bytes.as_chunks::<2>().0.iter().map(|&pair| {
+            if little {
+                u16::from_le_bytes(pair)
+            } else {
+                u16::from_be_bytes(pair)
+            }
+        });
+        char::decode_utf16(units)
+            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .filter(|&c| c != '\0')
+            .collect()
+    };
+    match bytes {
+        [0xff, 0xfe, rest @ ..] => return utf16(true, rest),
+        [0xfe, 0xff, rest @ ..] => return utf16(false, rest),
+        _ => {}
+    }
+    if bytes.len().is_multiple_of(2) {
+        // ASCII-range text in UTF-16 has a zero in every other byte.
+        let zeros = |offset: usize| {
+            bytes
+                .iter()
+                .skip(offset)
+                .step_by(2)
+                .filter(|&&b| b == 0)
+                .count()
+        };
+        let (even, odd) = (zeros(0), zeros(1));
+        let half = bytes.len() / 4;
+        if odd > half && even < odd {
+            return utf16(true, bytes);
+        }
+        if even > half && odd < even {
+            return utf16(false, bytes);
+        }
+    }
+    String::from_utf8_lossy(bytes).replace('\0', "")
+}
+
 /// Decode the whole archive or fail (as the Python app did); never partial.
 pub fn decode(raw: &[u8]) -> Result<Vec<Clip>, String> {
     let text = std::str::from_utf8(raw).map_err(|e| format!("invalid UTF-8: {e}"))?;
@@ -249,6 +297,7 @@ pub struct History {
     items: Vec<Clip>,
     pub load_error: Option<String>,
     unsafe_to_overwrite: bool,
+    repaired: bool,
     writer: Option<Writer>,
 }
 
@@ -261,12 +310,16 @@ impl History {
             items: Vec::new(),
             load_error: None,
             unsafe_to_overwrite: false,
+            repaired: false,
             writer: None,
         };
         if let Some(path) = &path {
             history.load(path);
             if let Some(on_error) = on_error {
                 history.writer = Some(Writer::new(on_error));
+            }
+            if history.repaired {
+                let _ = history.save();
             }
         }
         history
@@ -283,7 +336,10 @@ impl History {
             }
         };
         match decode(&raw) {
-            Ok(items) => self.items = items,
+            Ok(items) => {
+                self.items = items;
+                self.repaired = self.repair();
+            }
             Err(e) => {
                 let mut message = format!("Invalid clipboard history: {e}");
                 match preserve_corrupt(path, &raw) {
@@ -298,6 +354,25 @@ impl History {
                 self.load_error = Some(message);
             }
         }
+    }
+
+    /// Fix clippings that earlier versions recorded with NULs (UTF-16 read
+    /// as UTF-8, which also broke the tray). A repaired text that is already
+    /// in history merges into the newer entry. Returns whether anything changed.
+    fn repair(&mut self) -> bool {
+        let mut changed = false;
+        for clip in &mut self.items {
+            if clip.text.contains('\0') {
+                clip.text = clipboard_text(clip.text.as_bytes());
+                changed = true;
+            }
+        }
+        if changed {
+            let mut seen = HashSet::new();
+            self.items
+                .retain(|c| !c.text.trim().is_empty() && seen.insert(c.text.clone()));
+        }
+        changed
     }
 
     pub fn items(&self) -> &[Clip] {
@@ -605,6 +680,47 @@ mod tests {
             "e\u{301}\r\n\u{2028}\u{7f}\u{1}\u{1f}\u{8}\u{c}"
         );
         assert_eq!(clips[2].created_at, 1.7e20);
+    }
+
+    #[test]
+    fn utf16_clipboard_text_is_decoded_and_saved_clips_repaired() {
+        let utf16le: Vec<u8> = "https://put.gd/a.png\n\0"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        assert_eq!(clipboard_text(&utf16le), "https://put.gd/a.png\n");
+        let mut bom_be = vec![0xfe, 0xff];
+        bom_be.extend("Köln".encode_utf16().flat_map(u16::to_be_bytes));
+        assert_eq!(clipboard_text(&bom_be), "Köln");
+        assert_eq!(clipboard_text("Grüße\r\n".as_bytes()), "Grüße\r\n");
+        assert_eq!(clipboard_text(b"a\0bc"), "abc");
+
+        // As 0.8.3 recorded them: NULs between characters, beside a correct copy.
+        let dir = std::env::temp_dir().join(format!("jumpkut-test-{}", new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.json");
+        let clip = |id: &str, text: &str| Clip {
+            id: id.into(),
+            text: text.into(),
+            created_at: 1.0,
+        };
+        let broken = String::from_utf8(utf16le).unwrap();
+        std::fs::write(
+            &path,
+            encode(&[
+                clip("a", &broken),
+                clip("b", "https://put.gd/a.png\n"),
+                clip("c", "\0\0"),
+            ]),
+        )
+        .unwrap();
+        let history = History::open(Some(path.clone()), None);
+        assert_eq!(history.items(), [clip("a", "https://put.gd/a.png\n")]);
+        assert_eq!(
+            decode(&std::fs::read(&path).unwrap()).unwrap(),
+            history.items()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
