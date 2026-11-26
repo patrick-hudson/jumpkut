@@ -6,7 +6,7 @@
 
 ### Fixed
 
-- The tray icon no longer disappears for good after copying text that some apps (for example put.gd) hand over as UTF-16. Jumpkut decodes UTF-16 clipboard text that starts with a byte-order mark or is mostly ASCII or Latin-1 characters, never puts a NUL character in the tray menu (the session bus disconnected the tray for it), and repairs clippings that earlier versions recorded with NULs the next time it starts.
+- The tray icon no longer disappears for good after copying text that some apps (for example put.gd) hand over as UTF-16. Jumpkut recognises UTF-16 clipboard text by its byte-order mark or by the zero bytes that ASCII and Latin-1 characters leave in it, and decodes it, never puts a NUL character in the tray menu (the session bus disconnected the tray for it), and repairs clippings that earlier versions recorded with NULs the next time it starts.
 
 ## [0.8.3] - 2026-11-19
 
