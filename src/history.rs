@@ -363,14 +363,29 @@ impl History {
         let mut changed = false;
         for clip in &mut self.items {
             if clip.text.contains('\0') {
-                clip.text = clipboard_text(clip.text.as_bytes());
+                // U+FFFD means the original bytes are lost; only drop the NULs.
+                clip.text = if clip.text.contains(char::REPLACEMENT_CHARACTER) {
+                    clip.text.replace('\0', "")
+                } else {
+                    clipboard_text(clip.text.as_bytes())
+                };
                 changed = true;
             }
         }
         if changed {
-            let mut seen = HashSet::new();
-            self.items
-                .retain(|c| !c.text.trim().is_empty() && seen.insert(c.text.clone()));
+            let mut newest: HashMap<&str, (f64, usize)> = HashMap::new();
+            for (index, clip) in self.items.iter().enumerate() {
+                let entry = newest.entry(&clip.text).or_insert((clip.created_at, index));
+                if clip.created_at > entry.0 {
+                    *entry = (clip.created_at, index);
+                }
+            }
+            let keep: HashSet<usize> = newest.into_values().map(|(_, index)| index).collect();
+            let mut index = 0;
+            self.items.retain(|c| {
+                index += 1;
+                keep.contains(&(index - 1)) && !c.text.trim().is_empty()
+            });
         }
         changed
     }
@@ -699,23 +714,31 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("jumpkut-test-{}", new_id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("history.json");
-        let clip = |id: &str, text: &str| Clip {
+        let clip = |id: &str, text: &str, created_at: f64| Clip {
             id: id.into(),
             text: text.into(),
-            created_at: 1.0,
+            created_at,
         };
         let broken = String::from_utf8(utf16le).unwrap();
         std::fs::write(
             &path,
             encode(&[
-                clip("a", &broken),
-                clip("b", "https://put.gd/a.png\n"),
-                clip("c", "\0\0"),
+                clip("a", &broken, 1.0),
+                clip("b", "https://put.gd/a.png\n", 2.0),
+                clip("c", "\0\0", 1.0),
+                // Lossy (é became U+FFFD): the bytes are gone, only drop NULs.
+                clip("d", "A\0B\0\u{fffd}\0C\0", 1.0),
             ]),
         )
         .unwrap();
         let history = History::open(Some(path.clone()), None);
-        assert_eq!(history.items(), [clip("a", "https://put.gd/a.png\n")]);
+        assert_eq!(
+            history.items(),
+            [
+                clip("b", "https://put.gd/a.png\n", 2.0),
+                clip("d", "AB\u{fffd}C", 1.0)
+            ]
+        );
         assert_eq!(
             decode(&std::fs::read(&path).unwrap()).unwrap(),
             history.items()
